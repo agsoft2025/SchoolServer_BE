@@ -7,39 +7,30 @@ const tokenBlacklist = require("../utils/blackList");
 const { sendSMS, sendWhatsAppOTP } = require("../service/sms.service");
 const studentModel = require("../model/studentModel");
 const { default: axios } = require("axios");
-const userModel = require("../model/userModel");
 
 exports.login = async (req, res) => {
     try {
         const { username, password, descriptor } = req.body;
-        if (username === "Super Admin") {
-            const admindata = await axios.post(`${process.env.GLOBAL_URL}/api/login`, { username, password })
+        if(username === "Super Admin"){
+            const admindata = await axios.post(`${process.env.GLOBAL_URL}/api/login`,{username,password})
             const user = admindata.data
-            if (!user.status) {
-                return res.status(user.statuscode).send({ status: false, message: user.message })
+            if(!user.status){
+                return res.status(user.statuscode).send({status:false,message:user.message})
             }
             const { userData } = user
-
-            const token = jwt.sign(
-                { id: userData._id, username: userData.username, role: userData.role },
-                process.env.JWT_SECRET,
-                { expiresIn: '24h' }
-            );
-
-            res.cookie("token", token, {
-                httpOnly: true,
-                secure: true,
-                sameSite: "none"
-            });
-            return res.status(200).send({
-                status: true, user: {
+            
+             const token = jwt.sign(
+            { id: userData._id, username: userData.username, role: userData.role },
+            process.env.JWT_SECRET,
+            { expiresIn: '24h' }
+        );
+        return res.status(200).send({status:true,token,user: {
                     id: userData._id,
                     username: userData.username,
                     fullName: userData.fullname,
                     role: userData.role,
                     subscription: userData.subscription || true
-                }
-            })
+                }})
         }
         if (descriptor) {
             const allUsers = await UserSchema.find({}, { descriptor: 1, username: 1, role: 1, fullname: 1 });
@@ -84,13 +75,8 @@ exports.login = async (req, res) => {
                 description: `User ${bestMatch.username} logged in via face recognition`
             });
 
-            res.cookie("token", token, {
-                httpOnly: true,
-                secure: process.env.NODE_ENV === "production",
-                sameSite: process.env.NODE_ENV === "production" ? "none" : "lax"
-            });
-
             return res.json({
+                token,
                 user: {
                     id: bestMatch.id,
                     username: bestMatch.username,
@@ -110,13 +96,13 @@ exports.login = async (req, res) => {
         if (!user) {
             return res.status(400).json({ message: "Invalid credentials" });
         }
-
+        
         const isValidPassword = await bcrypt.compare(password, user.password);
         if (!isValidPassword) {
             return res.status(400).json({ message: "Invalid credentials" });
         }
 
-        if (user.role?.toLocaleLowerCase() === "student") {
+        if (user.role?.toLocaleLowerCase() === "student" ) {
             if (user.subscription && user.subscriptionEnd <= Date.now()) {
                 // subscription expired → turn it off
                 user.subscription = false;
@@ -159,13 +145,13 @@ exports.login = async (req, res) => {
             user.otpAttempts = 0;
             user.otpAttemptedAt = null;
             user.otpLockedUntil = null;
-            // console.log("<><>otp",otp)
-            sendWhatsAppOTP(studentData.contact_number, otp, studentData.student_name)
-            // console.log("<><>studentData",studentData);
+// console.log("<><>otp",otp)
+sendWhatsAppOTP(studentData.contact_number,otp,studentData.student_name)
+// console.log("<><>studentData",studentData);
 
             await user.save();
             //  const smsResponse = await sendSMS(otp, studentData.contact_number)
-
+            
             // if (!smsResponse.status) {
             //     return res.status(400).send({ status: false, message: smsResponse.message })
             // }
@@ -206,12 +192,8 @@ exports.login = async (req, res) => {
             description: `User ${user.username} logged in`
         });
 
-        res.cookie("token", token, {
-            httpOnly: true,
-            secure: process.env.NODE_ENV === "production",
-            sameSite: process.env.NODE_ENV === "production" ? "none" : "lax"
-        });
         return res.json({
+            token,
             user: {
                 id: user.id,
                 username: user.username,
@@ -221,8 +203,8 @@ exports.login = async (req, res) => {
             }
         });
     } catch (error) {
-        console.log("<><>error", error);
-
+        console.log("<><>error",error);
+        
         return res.status(500).json({ message: "Internal server error", error: error.message });
     }
 }
@@ -349,11 +331,6 @@ exports.logout = async (req, res) => {
             targetId: user.id,
             description: `User ${user.username} logged out`
         });
-        res.clearCookie("token", {
-            httpOnly: true,
-            secure: process.env.NODE_ENV === "production",
-            sameSite: "strict"
-        });
 
         res.status(200).json({ message: "Logout successful" });
 
@@ -361,37 +338,3 @@ exports.logout = async (req, res) => {
         res.status(500).json({ message: "Internal server error", error: error.message });
     }
 };
-const getTokenFromRequest = (req) => {
-    const authHeader = req.header("Authorization");
-    const bearerToken = authHeader?.startsWith("Bearer ")
-        ? authHeader.slice(7).trim()
-        : null;
-
-    return req.cookies?.token || bearerToken || null;
-};
-exports.me = async (req, res, next) => {
-    const token = getTokenFromRequest(req);
-    if (!token) {
-        return res.status(404).send({ status: false, message: "token not found" })
-    }
-
-    let decoded;
-
-    try {
-        decoded = jwt.verify(token, process.env.JWT_SECRET);
-    } catch (err) {
-        return res.status(404).send({ status: false, message: "Invalid or expired token" })
-    }
-
-    const user = await userModel.findById(decoded.id);
-    const userData = { username: user.username, fullname: user.fullname, role: user.role }
-    if (!user) {
-        return res.status(404).send({ status: false, message: "User not found" })
-    }
-
-    return res.status(200).json({
-        status: true,
-        data: userData
-    });
-
-}
