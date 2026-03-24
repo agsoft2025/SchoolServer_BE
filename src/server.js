@@ -1,0 +1,100 @@
+const express = require('express');
+const app = express();
+const path = require('path');
+require('dotenv').config()
+const cors = require('cors');
+const { dbConnect } = require('./config/db');
+const { scheduleBackup, rescheduleBackupOnUpdate } = require('./config/cronBackup');
+const cookieParser = require('cookie-parser')
+
+dbConnect();
+// === Daily Backup at 12:00 AM ===
+scheduleBackup();           // initial schedule
+rescheduleBackupOnUpdate();
+const hostname = '0.0.0.0';
+
+// <<<=== ADD THIS HERE: Preload Face Recognition Models ===>>>
+// const { loadModels } = require('./service/faceMatchService');
+// loadModels()
+//   .then(() => console.log('Models preloaded successfully'))
+//   .catch(err => console.error('Model load failed:', err));
+// <<<=== END ===>>>
+
+app.use(express.json());
+app.use(cookieParser());
+app.use('/uploads', express.static(path.join(__dirname,'..', 'uploads')));
+const authRoutes = require("./routes/authRoutes");
+const studentRoutes = require("./routes/studentRoutes");
+const financialRoutes = require("./routes/financialRoutes");
+const tuckShopRoutes = require("./routes/tuckShopRoutes");
+const cartRoutes = require("./routes/cartRoutes");
+const userRoutes = require("./routes/usersRoutes");
+const transactionRoutes = require("./routes/transactionRoutes");
+const dashboardRoutes = require("./routes/dashboardRoutes");
+const reportRoutes = require("./routes/reportRoutes");
+const auditLogsRoutes = require("./routes/auditRoutes");
+const authenticateToken = require("./middleware/authToken");
+const bulkOperations = require("./routes/bulkOprationRoutes");
+const departmentRoles = require("./routes/departmentRoutes");
+const studentLocationRoutes = require('./routes/studentLocationRoutes')
+const inventoryRoutes = require('./routes/inventoryRoutes')
+const backupRoutes = require('./routes/backupRoutes')
+const fileUploadRoutes = require('./routes/fileUploadRoutes')
+const paymentRoutes = require("./routes/paymentRoutes")
+const faceRouted = require("./routes/faceRecognationRoute")
+const globalRoutes = require("./routes/globalServerRoutes")
+const whatsapppRoutes = require("./routes/whatsappRoutes")
+const morgan = require("morgan");
+const { sendSMS, sendWhatsAppOTP } = require('./service/sms.service');
+
+// const allowedOrigins = ["http://localhost:5173"]
+
+// const corsOptionsDelegate = function (req, callback) {
+//     let corsOptions;
+//     if (allowedOrigins.includes(req.header('Origin'))) {
+//         corsOptions = { origin: true };
+//     } else {
+//         corsOptions = { origin: false }; 
+//     }
+//     callback(null, corsOptions);
+// };
+
+app.use(cors({
+  origin: "http://localhost:5173",
+  credentials: true
+}));
+app.use(morgan(":method :url :status :response-time ms"));
+app.use("/webhook",whatsapppRoutes)
+app.use("/user", authRoutes);
+app.use("/auth", authRoutes);
+
+app.use("/student-pro", studentRoutes);
+app.use("/student", authenticateToken, studentRoutes);
+app.use("/financial", authenticateToken, financialRoutes);
+app.use("/tuck-shop", authenticateToken, tuckShopRoutes);
+app.use("/pos-shop-cart", authenticateToken, cartRoutes);
+app.use("/users", authenticateToken, userRoutes);
+app.use("/faceRecognition",userRoutes)
+app.use("/transactions", authenticateToken, transactionRoutes);
+app.use("/dashboard", authenticateToken, dashboardRoutes);
+app.use("/reports", authenticateToken, reportRoutes);
+app.use("/logs", authenticateToken, auditLogsRoutes);
+app.use("/bulk-oprations", authenticateToken, bulkOperations);
+app.use("/department", authenticateToken, departmentRoles);
+app.use("/location", studentLocationRoutes)
+// inventory and canteen operation
+app.use('/inventory',authenticateToken,inventoryRoutes)
+app.use("/backup",authenticateToken,backupRoutes)
+app.use("/upload",authenticateToken,fileUploadRoutes)
+app.use("/payment",paymentRoutes)
+app.use("/face",faceRouted)
+app.use("/api/subscribers",globalRoutes)
+
+// sendWhatsAppOTP("918139886630","813988")
+// sendWhatsAppOTP("+918940891631","813988")
+
+
+app.listen(process.env.PORT, hostname, () => {
+    console.log(`server running successfully on ${process.env.PORT}`)
+    console.log('Running in', process.env.NODE_ENV, 'mode');
+})
