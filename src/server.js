@@ -58,9 +58,19 @@ const { sendSMS, sendWhatsAppOTP } = require('./service/sms.service');
 //     }
 //     callback(null, corsOptions);
 // };
-
+const allowedOrigins = [
+  "http://localhost:5173",
+  "http://agsoftsolutions.co.in",
+  "https://agsoftsolutions.co.in"
+];
 app.use(cors({
-  origin: "http://localhost:5173",
+   origin: function (origin, callback) {
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error("Not allowed by CORS"));
+    }
+  },
   credentials: true
 }));
 app.use(morgan(":method :url :status :response-time ms"));
