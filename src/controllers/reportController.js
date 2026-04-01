@@ -13,41 +13,50 @@ const classModel = require('../model/classModel');
 
 exports.quickStatistics = async (req, res) => {
     try {
-        const tmpDate = new Date();
-        const y = tmpDate.getFullYear();
-        const m = tmpDate.getMonth();
-        const todayStart = new Date(y, m, 1);
-        todayStart.setHours(0, 0, 0, 0);
-        let monthluyDeposits = 0;
-        let monthlyWagesPaid = 0;
+        const now = new Date();
+        const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+        monthStart.setHours(0, 0, 0, 0);
 
         const locationFilter = req.user.role === 'SUPER ADMIN' ? {} : { location_id: req.user.location_id };
+        const matchLocation = Object.keys(locationFilter || {}).length ? locationFilter : {};
 
         const totalBalanceAgg = await Inmate.aggregate([
-            { $match: locationFilter },
-            { $group: { _id: null, totalBalance: { $sum: "$balance" } } }
+            { $match: matchLocation },
+            { $group: { _id: null, totalBalance: { $sum: { $ifNull: ["$deposite_amount", 0] } } } }
         ]);
         const totalSystemBalance = totalBalanceAgg[0]?.totalBalance || 0;
 
-        const todaysFinancialTransactions = await Financial.find({
-            createdAt: { $gte: todayStart }, ...locationFilter
+        const depositMatch = {
+            createdAt: { $gte: monthStart },
+            type: { $regex: /^deposit$/i },
+            ...matchLocation
+        };
+        const depositAgg = await Financial.aggregate([
+            { $match: depositMatch },
+            { $group: { _id: null, total: { $sum: { $ifNull: ["$depositAmount", 0] } } } }
+        ]);
+        const monthlyDeposits = depositAgg[0]?.total || 0;
+
+        const wagesMatch = {
+            createdAt: { $gte: monthStart },
+            type: { $regex: /^wages?$/i },
+            ...matchLocation
+        };
+        const wagesAgg = await Financial.aggregate([
+            { $match: wagesMatch },
+            { $group: { _id: null, total: { $sum: { $ifNull: ["$wageAmount", 0] } } } }
+        ]);
+        const monthlyWagesPaid = wagesAgg[0]?.total || 0;
+
+        res.status(200).json({
+            success: true,
+            data: { totalSystemBalance, monthlyDeposits, monthlyWagesPaid },
+            message: "Quick statistics fetched",
         });
-
-        todaysFinancialTransactions.forEach(finance => {
-            if (finance.type == 'wages') {
-                monthlyWagesPaid += finance.wageAmount
-            } else if (finance.type == 'deposit') {
-                monthluyDeposits += finance.depositAmount
-            }
-        });
-
-
-        res.status(200).json({ success: true, data: { totalSystemBalance, monthlyWagesPaid, monthluyDeposits }, message: "Inmate successfully fetched" });
-
     } catch (error) {
         return res.status(500).json({ message: "Internal server error", error: error.message });
     }
-}
+};
 
 exports.intimateBalanceReport1 = async (req, res) => {
     try {

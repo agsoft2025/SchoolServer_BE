@@ -72,13 +72,21 @@ const getDashboardData = async (req, res) => {
 
                 const trxObj = trx.toObject ? trx.toObject() : trx; // convert Mongoose doc to plain object
 
+                const isReversed = Boolean(trx.is_reversed || trx.isReversed);
+                const statusLabel = isReversed ? "Reversed" : trx.status || "Completed";
+
                 return {
                     _id: trx._id,
                     type: 'POS',
                     totalAmount: trx.totalAmount,
                     createdAt: trx.createdAt,
+                    status: statusLabel,
+                    isReversed,
                     details: {
                         ...trxObj,
+                        status: trxObj.status || statusLabel,
+                        is_reversed: isReversed,
+                        isReversed,
                         custodyType: inmate?.custodyType || null
                     }
                 };
@@ -90,6 +98,8 @@ const getDashboardData = async (req, res) => {
             type: 'Financial',
             totalAmount: trx.wageAmount || trx.depositAmount || 0,
             createdAt: trx.createdAt,
+            status: trx.status || "Completed",
+            isReversed: Boolean(trx.is_reversed || trx.isReversed),
             details: trx
         }));
 
