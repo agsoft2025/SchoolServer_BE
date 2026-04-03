@@ -98,7 +98,7 @@ exports.intimateBalanceReport1 = async (req, res) => {
         if (inmateId) {
             const inmate = await Inmate.findOne({ inmateId }).lean();
             if (!inmate) {
-                return res.status(404).json({ success: false, message: "Inmate not found" });
+                return res.status(404).json({ success: false, message: "Student not found" });
             }
 
             inmate.financialHistory = await Financial.find({ inmateId, ...locationFilter }).lean();
@@ -518,9 +518,9 @@ exports.transactionSummaryReport = async (req, res) => {
 
         // Sort transactions by newest first
         allTransactions.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-        
+
         if (allTransactions.length === 0) {
-             return res.status(404).json({ success: false, message: "There is no record found to export" });
+            return res.status(404).json({ success: false, message: "There is no record found to export" });
         }
 
         // CSV Export

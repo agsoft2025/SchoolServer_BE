@@ -49,7 +49,7 @@ const downloadWagesCSV1 = async (req, res) => {
 
 const downloadWagesCSV2 = async (req, res) => {
   try {
-    const {student_id,format} = req.query
+    const { student_id, format } = req.query
     let financialData;
     const locationFilter = req.user.role === 'SUPER ADMIN' ? {} : { location_id: req.user.location_id };
     if (student_id) {
@@ -89,7 +89,7 @@ const downloadWagesCSV2 = async (req, res) => {
       current_balace: student.student_id.deposite_amount,
       depositor_name: student.depositedBy,
       contact_number: student.contactNumber,
-       created_at: moment(student.createdAt).format('YYYY-MM-DD HH:mm:ss')
+      created_at: moment(student.createdAt).format('YYYY-MM-DD HH:mm:ss')
     }))
 
     const fields = [
@@ -290,7 +290,7 @@ const createFinancial1 = async (req, res) => {
 
     const inmate = await InmateSchema.findOne({ inmateId });
     if (!inmate) {
-      return res.status(404).json({ message: "Inmate not found" });
+      return res.status(404).json({ message: "Student not found" });
     }
 
     let amountToAdd = 0;
@@ -330,7 +330,7 @@ const createFinancial1 = async (req, res) => {
       action: 'CREATE',
       targetModel: 'Financial',
       targetId: savedFinancial._id,
-      description: `Created ${type} record for inmate ${inmateId}`,
+      description: `Created ${type} record for student ${inmateId}`,
       changes: { ...req.body, custodyType: inmate.custodyType }
     });
 
@@ -549,7 +549,7 @@ const updateFinancial = async (req, res) => {
       action: 'UPDATE',
       targetModel: 'Financial',
       targetId: id,
-      description: `Updated financial record for inmate ${updatedFinancial.inmateId}`,
+      description: `Updated financial record for Student ${updatedFinancial.inmateId}`,
       changes: updatedFinancial
     });
     res.status(200).json({ success: true, data: updatedFinancial, message: "Financial update successfully" })
@@ -578,7 +578,7 @@ const deleteFinancial = async (req, res) => {
       action: 'DELETE',
       targetModel: 'Financial',
       targetId: updatedFinancial._id,
-      description: `Deleted financial record for inmate ${updatedFinancial.inmateId}`,
+      description: `Deleted financial record for student ${updatedFinancial.inmateId}`,
       changes: updatedFinancial.toObject()
     });
 

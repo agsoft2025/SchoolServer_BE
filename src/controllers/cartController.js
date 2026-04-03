@@ -42,7 +42,7 @@ const createPOSCart = async (req, res) => {
     // Check inmate existence
     const existingStudent = await studentModel.findById(studentId)
     if (!existingStudent) {
-      return res.status(400).json({ success: false, message: "Inmate ID does not exist" });
+      return res.status(400).json({ success: false, message: "Student ID does not exist" });
     }
 
     // Check sufficient balance
@@ -89,7 +89,7 @@ const createPOSCart = async (req, res) => {
       action: 'CREATE',
       targetModel: 'POSShoppingCart',
       targetId: savedCart._id,
-      description: `Created POS cart for inmate ${studentId}`,
+      description: `Created POS cart for Student ${existingStudent.registration_number}`,
       changes: { totalAmount, products, studentId }
     });
 
@@ -160,7 +160,7 @@ const updatePOSCart = async (req, res) => {
       action: 'UPDATE',
       targetModel: 'POSShoppingCart',
       targetId: updatedCart._id,
-      description: `Updated POS cart for inmate ${updatedCart.inmateID}`,
+      description: `Updated POS cart for Student ${updatedCart.inmateID}`,
       changes: updateBody
     });
 
@@ -189,7 +189,7 @@ const deletePOSCart = async (req, res) => {
       action: 'DELETE',
       targetModel: 'POSShoppingCart',
       targetId: deletedCart._id,
-      description: `Deleted POS cart for inmate ${deletedCart.inmateID}`,
+      description: `Deleted POS cart for Student ${deletedCart.inmateID}`,
       changes: deletedCart
     });
     res.status(200).json({ success: true, message: "POS cart deleted successfully" });
@@ -236,7 +236,7 @@ const reversePOSCart = async (req, res) => {
       action: "DELETE",
       targetModel: "POSShoppingCart",
       targetId: posCartData._id,
-      description: `Reversed POS cart for inmate ${posCartData.student_id}`,
+      description: `Reversed POS cart for student ${studentData.registration_number}`,
       changes: {
         ...posCartData.toObject()
       }
