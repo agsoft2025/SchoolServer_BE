@@ -586,9 +586,12 @@ exports.tuckShopSalesReport = async (req, res) => {
         }
 
         const locationFilter = req.user.role === 'SUPER ADMIN' ? {} : { location_id: req.user.location_id };
-        const transactions = await POSShoppingCart.find({
-            createdAt: { $gte: fromDate, $lte: toDate }, ...locationFilter
-        })
+        const baseQuery = {
+            createdAt: { $gte: fromDate, $lte: toDate },
+            is_reversed: false,
+            ...locationFilter
+        };
+        const transactions = await POSShoppingCart.find(baseQuery)
             .populate('products.productId', 'itemName price category')
             .populate('student_id', 'registration_number student_name board_name')
             .lean();
