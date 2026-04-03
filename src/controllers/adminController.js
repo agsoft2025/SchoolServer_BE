@@ -46,10 +46,6 @@ const getAllAdmins = async (req, res) => {
             .skip(skip)
             .limit(limit);
 
-        if (!admins.length) {
-            return res.status(404).json({ success: false, message: "No admins found", data: [] });
-        }
-
         res.json({
             success: true,
             data: admins,
@@ -107,16 +103,8 @@ const updateAdminById = async (req, res) => {
         const { username, fullname, newPassword, oldPassword, location_id } = req.body;
         const updateData = {};
 
-        // Fetch existing admin
-        let filter = {
-            _id: req.params.id,
-            role: { $in: ['ADMIN', 'SUPER ADMIN'] },
-            isDeleted: { $ne: true }
-        };
-
-        if (req.user.role !== 'SUPER ADMIN') {
-            filter.location_id = req.user.location_id;
-        }
+        //  Fetch existing admin 
+        let filter = { _id: req.params.id, role: { $in: ['ADMIN', 'SUPER ADMIN'] }, isDeleted: { $ne: true } }; if (req.user.role !== 'SUPER ADMIN') { filter.location_id = req.user.location_id; }
 
         const admin = await UserSchema.findOne(filter);
         if (!admin) {
@@ -158,7 +146,7 @@ const updateAdminById = async (req, res) => {
             { $set: updateData },
             { new: true, runValidators: true }
         ).select('-password').populate('location_id', 'location_name');
-
+        console.log("<><>updatedAdmin", updatedAdmin);
         // Audit log
         await logAudit({
             userId: req.user.id,
@@ -173,6 +161,7 @@ const updateAdminById = async (req, res) => {
         res.json({ success: true, data: updatedAdmin, message: 'Admin updated successfully' });
 
     } catch (error) {
+        console.log("<><>error", error)
         res.status(500).json({ success: false, message: 'Internal server error', error: error.message });
     }
 };

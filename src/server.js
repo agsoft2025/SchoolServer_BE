@@ -45,9 +45,10 @@ const { sendSMS, sendWhatsAppOTP } = require('./service/sms.service');
 const { authenticateToken } = require('./middleware/authToken');
 const auditRequestLogger = require('./middleware/auditRequestLogger');
 const authRoutes = require("./routes/authRoutes")
+const adminRoutes = require("./routes/adminRoutes")
 const cookieParser = require("cookie-parser");
 
-const allowedOrigins = ["http://localhost:5173"]
+const allowedOrigins = ["http://localhost:5173","http://localhost:5174"]
 
 // const corsOptionsDelegate = function (req, callback) {
 //     let corsOptions;
@@ -67,6 +68,7 @@ app.use(cookieParser());
 app.use(morgan(":method :url :status :response-time ms"));
 app.use("/webhook", whatsapppRoutes)
 app.use("/user", authRoutes);
+app.use("/admin", adminRoutes);
 
 app.use("/student-pro", studentRoutes);
 app.use("/student", authenticateToken, auditRequestLogger, studentRoutes);

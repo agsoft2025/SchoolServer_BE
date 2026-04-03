@@ -323,41 +323,41 @@ exports.logout1 = async (req, res) => {
 };
 
 exports.logout = async (req, res) => {
-  try {
-    const user = req.user;
+    try {
+        const user = req.user;
 
-    const token =
-      req.cookies.token ||
-      req.headers.authorization?.split(" ")[1];
+        const token =
+            req.cookies.token ||
+            req.headers.authorization?.split(" ")[1];
 
-    if (!user || !token) {
-      return res.status(401).json({ message: "Unauthorized" });
+        if (!user || !token) {
+            return res.status(401).json({ message: "Unauthorized" });
+        }
+
+        tokenBlacklist.add(token);
+
+        await logAudit({
+            user: { id: user.id, username: user.username },
+            username: user.username,
+            action: 'LOGOUT',
+            targetModel: 'User',
+            targetId: user.id,
+            description: `User ${user.username} logged out`
+        });
+
+        // ✅ THIS is what you're missing
+        res.clearCookie("token", {
+            httpOnly: true,
+            secure: false,
+            sameSite: "lax"
+        });
+
+        return res.status(200).json({ message: "Logout successful" });
+
+    } catch (error) {
+        return res.status(500).json({
+            message: "Internal server error",
+            error: error.message
+        });
     }
-
-    tokenBlacklist.add(token);
-
-    await logAudit({
-      user: { id: user.id, username: user.username },
-      username: user.username,
-      action: 'LOGOUT',
-      targetModel: 'User',
-      targetId: user.id,
-      description: `User ${user.username} logged out`
-    });
-
-    // ✅ THIS is what you're missing
-    res.clearCookie("token", {
-      httpOnly: true,
-      secure: false,
-      sameSite: "lax"
-    });
-
-    return res.status(200).json({ message: "Logout successful" });
-
-  } catch (error) {
-    return res.status(500).json({
-      message: "Internal server error",
-      error: error.message
-    });
-  }
 };

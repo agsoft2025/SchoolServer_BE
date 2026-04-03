@@ -119,7 +119,7 @@ const superAdminCreate = async (req, res) => {
             description: `Created admin "${savedUser.username}"`
         })
 
-        res.status(200).send({ success: true, message: "admin created successfully", data: savedUser })
+        res.status(200).send({ success: true, message: "admin created successfully" })
     } catch (error) {
         console.log("<>>error",error)
         return res.status(500).send({ status: false, error: error.message, message: "internal server down" })
