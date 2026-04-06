@@ -48,7 +48,13 @@ const authRoutes = require("./routes/authRoutes")
 const adminRoutes = require("./routes/adminRoutes")
 const cookieParser = require("cookie-parser");
 
-const defaultOrigins = ["http://localhost:5173", "http://localhost:5174","http://152.67.190.22:3000","http://agsoftsolutions.co.in","https://www.agsoftsolutions.co.in"];
+const defaultOrigins = [
+  "http://localhost:5173",
+  "http://localhost:5174",
+  "http://152.67.190.22:3000",
+  "http://agsoftsolutions.co.in",
+  "http://152.67.190.22"
+];
 const envOrigins = (process.env.CORS_ORIGINS || "")
   .split(",")
   .map((origin) => origin.trim())
@@ -109,7 +115,7 @@ app.use("/api/subscribers", authenticateToken, auditRequestLogger, globalRoutes)
 
 
 app.listen(process.env.PORT, hostname, () => {
-    console.log(`server running successfully on ${process.env.PORT}`)
-    console.log('Running in', process.env.NODE_ENV, 'mode');
+  console.log(`server running successfully on ${process.env.PORT}`)
+  console.log('Running in', process.env.NODE_ENV, 'mode');
 })
 app.use("/transactions", authenticateToken, auditRequestLogger, transactionRoutes);
