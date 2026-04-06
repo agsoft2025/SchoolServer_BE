@@ -48,7 +48,7 @@ const authRoutes = require("./routes/authRoutes")
 const adminRoutes = require("./routes/adminRoutes")
 const cookieParser = require("cookie-parser");
 
-const defaultOrigins = ["http://localhost:5173", "http://localhost:5174"];
+const defaultOrigins = ["http://localhost:5173", "http://localhost:5174","http://152.67.190.22:3000","http://agsoftsolutions.co.in","https://www.agsoftsolutions.co.in"];
 const envOrigins = (process.env.CORS_ORIGINS || "")
   .split(",")
   .map((origin) => origin.trim())
