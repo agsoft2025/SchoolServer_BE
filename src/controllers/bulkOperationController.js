@@ -149,7 +149,7 @@ const bulkUpsertInmates = async (req, res) => {
           results.created.push(inmateId);
           if (savedInmate) {
             const hashedPassword = await bcrypt.hash(inmateId, 10);
-            const newUser = new userModel({ username: inmateId, fullname: inmateId, inmateId, password: hashedPassword, role: "INMATE", location_id });
+            const newUser = new userModel({ username: inmateId, fullname: inmateId, inmateId, password: hashedPassword, role: "Student", location_id });
             await newUser.save().then((data) => {
 
             }).catch((error) => {
@@ -165,15 +165,15 @@ const bulkUpsertInmates = async (req, res) => {
         userId: req.user.id,
         username: req.user.username,
         action: 'BULK_UPSERT',
-        targetModel: 'Inmate',
+        targetModel: 'Student',
         targetId: null,
-        description: `Bulk upsert of inmates performed. Created: ${results.created.length}, Updated: ${results.updated.length}, Failed: ${results.failed.length}`,
+        description: `Bulk upsert of students performed. Created: ${results.created.length}, Updated: ${results.updated.length}, Failed: ${results.failed.length}`,
         changes: results
       });
 
       return res.status(200).json({
         success: true,
-        message: 'Bulk inmate operation completed',
+        message: 'Bulk student operation completed',
         results
       });
 
@@ -229,7 +229,7 @@ const bulkUpsertStudents = async (req, res) => {
 
     for (const student of students) {
       const {
-        Roll_no:registration_number,
+        Roll_no: registration_number,
         student_name,
         father_name,
         mother_name,
@@ -338,7 +338,7 @@ const bulkUpsertStudents = async (req, res) => {
           gender,
           hostel_name,
           board_name,
-          deposite_amount:0,
+          deposite_amount: 0,
           class_info: classData._id,
           location_id,
           contact_number,
@@ -484,7 +484,7 @@ const bulkUpsertFinancial = async (req, res) => {
                 inmate.custodyType = custodyType;
                 await inmate.save();
               } else {
-                results.failed.push({ inmateId, reason: 'Inmate not found for balance update' });
+                results.failed.push({ inmateId, reason: 'Student not found for balance update' });
                 continue;
               }
             }

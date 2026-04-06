@@ -1,4 +1,4 @@
-﻿const AuditLog = require('../model/auditLogModel');
+const AuditLog = require('../model/auditLogModel');
 const { requireUserLocation } = require('../utils/locationGuard');
 
 const getAuditLogs = async (req, res) => {
@@ -43,7 +43,7 @@ const getAuditLogs = async (req, res) => {
       .limit(pageSize)
       .lean();
 
-    const sanitizedLogs = logs.map(({ changes, ...rest }) => rest);
+    const sanitizedLogs = logs; // Keeping changes for frontend
 
     res.status(200).json({
       success: true,

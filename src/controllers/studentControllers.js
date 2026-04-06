@@ -137,8 +137,8 @@ const downloadStudentsCSV = async (req, res) => {
       student_name: student.student_name,
       father_name: student.father_name,
       mother_name: student.mother_name,
-      board_name:student.board_name,
-      hostel_name:student.hostel_name,
+      board_name: student.board_name,
+      hostel_name: student.hostel_name,
       gender: student.gender,
       deposite_amount: student.deposite_amount,
       class_name: student.class_info?.class_name || '',
@@ -174,7 +174,7 @@ const createStudent = async (req, res) => {
       registration_number, student_name, father_name, mother_name,
       date_of_birth, gender, birth_place, nationality, mother_tongue,
       blood_group, religion, deposite_amount, class_info, location_id,
-      pro_pic, contact_number, descriptor, hostel_name,board_name
+      pro_pic, contact_number, descriptor, hostel_name, board_name
     } = req.body;
 
     if (req.user.role !== 'SUPER ADMIN') {
@@ -211,7 +211,7 @@ const createStudent = async (req, res) => {
     if (!validGenders.includes(gender)) {
       return res.status(400).json({ success: false, message: "Invalid gender value." });
     }
-    
+
 
     // 2️⃣ Check duplicate student
     const existingStudent = await studentModel.findOne({ registration_number, location_id });
@@ -252,8 +252,8 @@ const createStudent = async (req, res) => {
       role: 'STUDENT',
       location_id,
       descriptor: descriptor || null,
-        created_by: req.user.id,
-        updated_by: req.user.id
+      created_by: req.user.id,
+      updated_by: req.user.id
     });
 
     // 7️⃣ Create student with user_id
@@ -681,7 +681,7 @@ const deleteStudent = async (req, res) => {
 
     // 4️⃣ Soft delete user account(s) using robust matching
     await userModel.updateMany(
-      { 
+      {
         $or: [
           ...(studentData.user_id ? [{ _id: studentData.user_id }] : []),
           { username: studentData.registration_number }
@@ -841,12 +841,12 @@ const deleteInmate = async (req, res) => {
       userId: req.user.id,
       username: req.user.username,
       action: 'DELETE',
-      targetModel: 'Inmate',
+      targetModel: 'Student',
       targetId: updatedInmate._id,
-      description: `Deleted inmate ${updatedInmate.inmateId}`,
+      description: `Deleted Student ${updatedInmate.inmateId}`,
       changes: updatedInmate.toObject()
     });
-    res.status(200).json({ success: true, message: "Inmate successfully deleted" })
+    res.status(200).json({ success: true, message: "Student successfully deleted" })
   } catch (error) {
     res.status(500).json({ success: false, message: "Internal server error", error: error.message });
   }
@@ -898,7 +898,7 @@ const getInmateUsingInmateID = async (req, res) => {
     if (!findInmate) {
       return res.status(404).json({ message: "No data found" });
     }
-    res.status(200).json({ success: true, data: findInmate, message: "Inmate successfully fetched" })
+    res.status(200).json({ success: true, data: findInmate, message: "Student successfully fetched" })
   } catch (error) {
     res.status(500).json({ success: false, message: "Internal server error", error: error.message });
   }
@@ -986,7 +986,7 @@ const getInmateTransactionData = async (req, res) => {
       limit: pageSize,
       totalPages: Math.ceil(allTransactions.length / pageSize),
       transactions: paginated,
-      message: "Fetched inmate transactions",
+      message: "Fetched student transactions",
     });
 
 
@@ -1197,4 +1197,4 @@ const fetchInmateDataUsingFace = async (req, res) => {
     return res.status(500).send({ success: false, message: "internal server down", error: error.message })
   }
 }
-module.exports = { createStudent, getStudents, deleteStudent, getStudentById, downloadStudentsCSV, updateStudent, deleteInmate, searchInmates, downloadInmatesCSV, getInmateUsingInmateID, getInmateTransactionData, fetchInmateDataUsingFace, getStudentByData, getStudentTransactionData,getStudentByIdProfile };
+module.exports = { createStudent, getStudents, deleteStudent, getStudentById, downloadStudentsCSV, updateStudent, deleteInmate, searchInmates, downloadInmatesCSV, getInmateUsingInmateID, getInmateTransactionData, fetchInmateDataUsingFace, getStudentByData, getStudentTransactionData, getStudentByIdProfile };

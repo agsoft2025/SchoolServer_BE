@@ -7,6 +7,15 @@ const tokenBlacklist = require("../utils/blackList");
 const { sendSMS, sendWhatsAppOTP } = require("../service/sms.service");
 const studentModel = require("../model/studentModel");
 const { default: axios } = require("axios");
+const { attachAuthCookie, clearAuthCookie } = require("../utils/authCookies");
+
+const buildUserPayload = (user) => ({
+    id: user.id,
+    username: user.username,
+    fullName: user.fullname,
+    role: user?.role,
+    subscription: user?.subscription
+});
 
 exports.login = async (req, res) => {
     try {
@@ -54,15 +63,11 @@ exports.login = async (req, res) => {
                 description: `User ${bestMatch.username} logged in via face recognition`
             });
 
+            attachAuthCookie(req, res, token);
+
             return res.json({
                 token,
-                user: {
-                    id: bestMatch.id,
-                    username: bestMatch.username,
-                    fullName: bestMatch.fullname,
-                    role: bestMatch.role,
-                    subscription: bestMatch.subscription
-                },
+                user: buildUserPayload(bestMatch),
                 distance: minDistance
             });
         }
@@ -83,6 +88,11 @@ exports.login = async (req, res) => {
         }
 
         if (user.role?.toLocaleLowerCase() === "student") {
+            const token = jwt.sign(
+                { id: user.id, username: user.username, role: user.role },
+                process.env.JWT_SECRET,
+                { expiresIn: '24h' }
+            );
             if (user.subscription && user.subscriptionEnd <= Date.now()) {
                 // subscription expired → turn it off
                 user.subscription = false;
@@ -90,21 +100,11 @@ exports.login = async (req, res) => {
             }
 
             if (!user.subscription) {
-                // const token = jwt.sign(
-                //     { id: user.id, username: user.username, role: user.role },
-                //     process.env.JWT_SECRET,
-                //     { expiresIn: '24h' }
-                // );
+                attachAuthCookie(req, res, token);
                 return res.json({
-                    // token,
+                    token,
                     status: false,
-                    user: {
-                        id: user.id,
-                        username: user.username,
-                        fullName: user.fullname,
-                        role: user?.role,
-                        subscription: user?.subscription
-                    },
+                    user: buildUserPayload(user),
                     message: "user not subscribe"
                 });
 
@@ -125,7 +125,7 @@ exports.login = async (req, res) => {
             user.otpAttempts = 0;
             user.otpAttemptedAt = null;
             user.otpLockedUntil = null;
-            // console.log("<><>otp",otp)
+            console.log("<><>otp",otp)
             sendWhatsAppOTP(studentData.contact_number, otp, studentData.student_name)
             // console.log("<><>studentData",studentData);
 
@@ -146,13 +146,7 @@ exports.login = async (req, res) => {
             return res.status(200).send({
                 status: true,
                 otp,
-                user: {
-                    id: user.id,
-                    username: user.username,
-                    fullName: user.fullname,
-                    role: user?.role,
-                    subscription: user?.subscription
-                },
+                user: buildUserPayload(user),
                 message: "OTP has been sent successfully to your registered mobile number"
             })
 
@@ -171,21 +165,10 @@ exports.login = async (req, res) => {
             targetId: user._id,
             description: `User ${user.username} logged in`
         });
-        res.cookie("token", token, {
-            httpOnly: true,          // prevents JS access (IMPORTANT for security)
-            secure: false,           // true in production (HTTPS only)
-            sameSite: "lax",         // or "none" if frontend/backend different domains
-            maxAge: 24 * 60 * 60 * 1000 // 1 day
-        });
+        attachAuthCookie(req, res, token);
         return res.json({
             token,
-            user: {
-                id: user.id,
-                username: user.username,
-                fullName: user.fullname,
-                role: user?.role,
-                subscription: user?.subscription
-            }
+            user: buildUserPayload(user)
         });
     } catch (error) {
         return res.status(500).json({ message: "Internal server error", error: error.message });
@@ -272,17 +255,13 @@ exports.verifyOTP = async (req, res) => {
             description: `User ${user.username} logged in successfully`
         });
 
+        attachAuthCookie(req, res, token);
+
         return res.status(200).json({
             status: true,
             message: "OTP verified successfully",
             token,
-            user: {
-                id: user.id,
-                username: user.username,
-                fullName: user.fullname,
-                role: user.role,
-                subscription: user.subscription
-            }
+            user: buildUserPayload(user)
         });
 
     } catch (error) {
@@ -323,41 +302,57 @@ exports.logout1 = async (req, res) => {
 };
 
 exports.logout = async (req, res) => {
-  try {
-    const user = req.user;
+    try {
+        const user = req.user;
 
-    const token =
-      req.cookies.token ||
-      req.headers.authorization?.split(" ")[1];
+        const token =
+            req.cookies.token ||
+            req.headers.authorization?.split(" ")[1];
 
-    if (!user || !token) {
-      return res.status(401).json({ message: "Unauthorized" });
+        if (!user || !token) {
+            return res.status(401).json({ message: "Unauthorized" });
+        }
+
+        tokenBlacklist.add(token);
+
+        await logAudit({
+            user: { id: user.id, username: user.username },
+            username: user.username,
+            action: 'LOGOUT',
+            targetModel: 'User',
+            targetId: user.id,
+            description: `User ${user.username} logged out`
+        });
+
+        // ✅ THIS is what you're missing
+        clearAuthCookie(req, res);
+
+        return res.status(200).json({ message: "Logout successful" });
+
+    } catch (error) {
+        return res.status(500).json({
+            message: "Internal server error",
+            error: error.message
+        });
     }
+};
 
-    tokenBlacklist.add(token);
+exports.getSession = async (req, res) => {
+    try {
+        const user = await UserSchema.findById(req.user.id);
 
-    await logAudit({
-      user: { id: user.id, username: user.username },
-      username: user.username,
-      action: 'LOGOUT',
-      targetModel: 'User',
-      targetId: user.id,
-      description: `User ${user.username} logged out`
-    });
+        if (!user || user.isDeleted) {
+            return res.status(401).json({ message: "Session expired" });
+        }
 
-    // ✅ THIS is what you're missing
-    res.clearCookie("token", {
-      httpOnly: true,
-      secure: false,
-      sameSite: "lax"
-    });
-
-    return res.status(200).json({ message: "Logout successful" });
-
-  } catch (error) {
-    return res.status(500).json({
-      message: "Internal server error",
-      error: error.message
-    });
-  }
+        return res.status(200).json({
+            authenticated: true,
+            user: buildUserPayload(user)
+        });
+    } catch (error) {
+        return res.status(500).json({
+            message: "Internal server error",
+            error: error.message
+        });
+    }
 };

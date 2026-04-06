@@ -26,6 +26,7 @@ exports.addInventoryStock = async (req, res) => {
     }
     return res.send({ success: true, data: storeItem, message: "inventory added successfully" })
   } catch (error) {
+    console.log("<><>error",error)
     return res.status(500).send({ success: false, message: "internal server down", error: error.message })
   }
 }
@@ -761,11 +762,11 @@ exports.createCanteenStock = async (req, res) => {
       return res.status(400).json({ success: false, message: "Location is required to create canteen stock" });
     }
 
-    const inventoryItem = await storeItemModel.findOne({ itemNo });
+    const inventoryItem = await storeItemModel.findOne({ itemNo, location_id });
     if (inventoryItem) {
       return res.status(404).json({ success: false, message: "item number already exists" });
     }
-    const tuckshopItem = await tuckShopModel.findOne({ itemNo });
+    const tuckshopItem = await tuckShopModel.findOne({ itemNo, location_id });
     if (tuckshopItem) {
       return res.status(404).json({ success: false, message: "item already exists in tuckshop" });
     }
@@ -791,6 +792,7 @@ exports.createCanteenStock = async (req, res) => {
     return res.status(200).json({ success: true, message: "canteen stock created successfully" });
 
   } catch (error) {
+    console.log("Error in createCanteenStock:", error);
     return res.status(500).json({ success: false, message: "internal server down", error: error });
   }
 };

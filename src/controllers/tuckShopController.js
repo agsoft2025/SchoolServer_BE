@@ -20,7 +20,7 @@ const createTuckShop = async (req, res) => {
       if (!itemName || price == null || stockQuantity == null || !itemNo || !category) {
         return res.status(400).json({ message: "Missing required fields" });
       }
-      const isItem = await TuckShopSchema.findOne({itemNo:itemNo})
+      const isItem = await TuckShopSchema.findOne({ itemNo: itemNo, location_id });
       if(isItem){
         return res.status(403).send({success:false,message:`item number ${itemNo} already existing`})
       }

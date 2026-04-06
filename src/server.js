@@ -45,9 +45,15 @@ const { sendSMS, sendWhatsAppOTP } = require('./service/sms.service');
 const { authenticateToken } = require('./middleware/authToken');
 const auditRequestLogger = require('./middleware/auditRequestLogger');
 const authRoutes = require("./routes/authRoutes")
+const adminRoutes = require("./routes/adminRoutes")
 const cookieParser = require("cookie-parser");
 
-const allowedOrigins = ["http://localhost:5173"]
+const defaultOrigins = ["http://localhost:5173", "http://localhost:5174"];
+const envOrigins = (process.env.CORS_ORIGINS || "")
+  .split(",")
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+const allowedOrigins = [...new Set([...defaultOrigins, ...envOrigins])];
 
 // const corsOptionsDelegate = function (req, callback) {
 //     let corsOptions;
@@ -59,14 +65,23 @@ const allowedOrigins = ["http://localhost:5173"]
 //     callback(null, corsOptions);
 // };
 
+app.set("trust proxy", 1);
+
 app.use(cors({
-  origin: allowedOrigins,
+  origin(origin, callback) {
+    if (!origin || allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+
+    return callback(new Error("Not allowed by CORS"));
+  },
   credentials: true
 }));
 app.use(cookieParser());
 app.use(morgan(":method :url :status :response-time ms"));
 app.use("/webhook", whatsapppRoutes)
 app.use("/user", authRoutes);
+app.use("/admin", adminRoutes);
 
 app.use("/student-pro", studentRoutes);
 app.use("/student", authenticateToken, auditRequestLogger, studentRoutes);
