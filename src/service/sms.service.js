@@ -37,6 +37,7 @@ exports.sendWhatsAppOTP = async (phone, otp,name) => {
         "Content-Type": "application/json"
       }
     });
+    console.log("<><>whatsapp",res)
     return { success: true };
 
   } catch (error) {
