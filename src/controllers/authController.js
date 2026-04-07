@@ -126,6 +126,7 @@ exports.login = async (req, res) => {
             user.otpAttemptedAt = null;
             user.otpLockedUntil = null;
             console.log("<><>otp",otp)
+            console.log("<><>studentData",studentData)
             sendWhatsAppOTP(studentData.contact_number, otp, studentData.student_name)
             // console.log("<><>studentData",studentData);
 
