@@ -53,7 +53,8 @@ const defaultOrigins = [
   "http://localhost:5174",
   "http://152.67.190.22:3000",
   "http://agsoftsolutions.co.in",
-  "http://152.67.190.22"
+  "http://152.67.190.22",
+  "https://agsoftsolutions.co.in"
 ];
 const envOrigins = (process.env.CORS_ORIGINS || "")
   .split(",")
