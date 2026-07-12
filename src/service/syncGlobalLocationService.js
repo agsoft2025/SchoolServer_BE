@@ -30,17 +30,21 @@ async function syncToGlobal(location) {
 }
 
 async function syncUpdateToGlobal(location) {
+  console.log("<><>working")
+  console.log("<><>location",location)
   try {
     const payload = {
       name: location.schoolName,
       location: location.locationName,
       baseUrl: location.baseUrl
     };
-
+console.log("<><>payload",payload)
+console.log("process.env.GLOBAL_URL",process.env.GLOBAL_URL)
     const data =await axios.put(
       `${process.env.GLOBAL_URL}/api/location/${location._id.toString()}`,
       payload
     );
+    console.log("Update response from global server:", data.data);
 
   } catch (err) {
     // do NOT throw
@@ -48,6 +52,7 @@ async function syncUpdateToGlobal(location) {
       syncStatus: "FAILED",
       syncError: err.message
     });
+    console.log("Error syncing update to global server:", err);
   }
 }
 

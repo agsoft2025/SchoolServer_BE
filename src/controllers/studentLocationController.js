@@ -281,7 +281,6 @@ exports.updateLocation = async (req, res) => {
       updateData,
       { new: true, runValidators: true }
     );
-console.log("<><>updatedLocation",updatedLocation)
      // 🔴 Ensure admin has location_id
     const locationupdate = await userModel.findByIdAndUpdate(
       req.user.id,
