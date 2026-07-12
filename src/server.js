@@ -112,7 +112,9 @@ app.use("/upload", authenticateToken, auditRequestLogger, fileUploadRoutes)
 app.use("/payment", authenticateToken, auditRequestLogger, paymentRoutes)
 app.use("/face", authenticateToken, auditRequestLogger, faceRouted)
 app.use("/api/subscribers", authenticateToken, auditRequestLogger, globalRoutes)
-
+app.use("/", (req, res) => {
+  res.status(200).json({ message: "Welcome to School Server API" });
+});
 // sendWhatsAppOTP("918139886630","813988")
 // sendWhatsAppOTP("+918940891631","813988")
 
