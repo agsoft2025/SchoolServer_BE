@@ -113,7 +113,7 @@ app.use("/payment", authenticateToken, auditRequestLogger, paymentRoutes)
 app.use("/face", authenticateToken, auditRequestLogger, faceRouted)
 app.use("/api/subscribers", authenticateToken, auditRequestLogger, globalRoutes)
 app.use("/", (req, res) => {
-  res.status(200).json({ message: "Welcome to School Server API" });
+  res.status(200).json({ message: "Welcome to School Server API v.1.0.0" });
 });
 // sendWhatsAppOTP("918139886630","813988")
 // sendWhatsAppOTP("+918940891631","813988")
