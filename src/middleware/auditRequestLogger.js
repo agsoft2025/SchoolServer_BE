@@ -65,6 +65,12 @@ const customDescriptions = [
       return `Created student ${req.body?.registration_number || req.body?.studentId || "new entry"}`;
     },
   },
+  {
+    match: (req) => req.method === "POST" && req.path === "/sms/send",
+    build: (req) => {
+      return `Sent ${req.body?.mode || "sms"} SMS`;
+    },
+  },
 ];
 
 const describeRequest = (req, action) => {

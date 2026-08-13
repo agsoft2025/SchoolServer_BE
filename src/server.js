@@ -40,6 +40,7 @@ const paymentRoutes = require("./routes/paymentRoutes")
 const faceRouted = require("./routes/faceRecognationRoute")
 const globalRoutes = require("./routes/globalServerRoutes")
 const whatsapppRoutes = require("./routes/whatsappRoutes")
+const smsRoutes = require("./routes/smsRoutes")
 const morgan = require("morgan");
 const { sendSMS, sendWhatsAppOTP } = require('./service/sms.service');
 const { authenticateToken } = require('./middleware/authToken');
@@ -112,6 +113,7 @@ app.use("/upload", authenticateToken, auditRequestLogger, fileUploadRoutes)
 app.use("/payment", authenticateToken, auditRequestLogger, paymentRoutes)
 app.use("/face", authenticateToken, auditRequestLogger, faceRouted)
 app.use("/api/subscribers", authenticateToken, auditRequestLogger, globalRoutes)
+app.use("/sms", authenticateToken, auditRequestLogger, smsRoutes)
 app.use("/", (req, res) => {
   res.status(200).json({ message: "Welcome to School Server API v.1.0.0" });
 });
