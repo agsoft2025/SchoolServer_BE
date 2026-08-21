@@ -8,6 +8,7 @@ const { sendSMS, sendWhatsAppOTP } = require("../service/sms.service");
 const studentModel = require("../model/studentModel");
 const { default: axios } = require("axios");
 const { attachAuthCookie, clearAuthCookie } = require("../utils/authCookies");
+const escapeRegex = require("../utils/escapeRegex");
 
 const buildUserPayload = (user) => ({
     id: user.id,
@@ -76,7 +77,7 @@ exports.login = async (req, res) => {
             return res.status(400).json({ message: "Username and password required" });
         }
 
-        const user = await UserSchema.findOne({ username: { $regex: `^${username}$`, $options: 'i' }, isDeleted: { $ne: true } });
+        const user = await UserSchema.findOne({ username: { $regex: `^${escapeRegex(username)}$`, $options: 'i' }, isDeleted: { $ne: true } });
         if (!user) {
             return res.status(400).json({ message: "Invalid credentials" });
         }

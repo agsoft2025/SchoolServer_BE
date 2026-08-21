@@ -1,7 +1,22 @@
 const UserSchema = require("../model/userModel");
+const studentLocationModel = require("../model/studentLocationModel");
 const bcrypt = require('bcrypt');
 const mongoose = require("mongoose");
 const logAudit = require("../utils/auditlogger");
+
+// Lightweight location list for the Super Admin "assign admin to a school" picker.
+// authenticateSuperAdmin (route-level) doesn't require a local DB user row, unlike
+// authenticateToken used on /location, so this is reachable with a Global-issued token.
+const getLocationsForAdmin = async (req, res) => {
+    try {
+        const locations = await studentLocationModel
+            .find({}, "schoolName locationName baseUrl")
+            .sort({ schoolName: 1 });
+        res.json({ success: true, data: locations });
+    } catch (error) {
+        res.status(500).json({ success: false, message: 'Internal server error', error: error.message });
+    }
+};
 
 const getAllAdmins = async (req, res) => {
     const page = parseInt(req.query.page) || 1;
@@ -41,7 +56,7 @@ const getAllAdmins = async (req, res) => {
 
         const admins = await UserSchema.find(filter)
             .select('-password')
-            .populate('location_id', 'location_name')
+            .populate('location_id', 'schoolName locationName baseUrl')
             .sort({ [sortField]: sortOrder })
             .skip(skip)
             .limit(limit);
@@ -86,7 +101,7 @@ const getAdminById = async (req, res) => {
 
         const admin = await UserSchema.findOne(filter)
             .select('-password')
-            .populate('location_id', 'location_name');
+            .populate('location_id', 'schoolName locationName baseUrl');
 
         if (!admin) {
             return res.status(404).json({ success: false, message: 'Admin not found' });
@@ -145,7 +160,7 @@ const updateAdminById = async (req, res) => {
             req.params.id,
             { $set: updateData },
             { new: true, runValidators: true }
-        ).select('-password').populate('location_id', 'location_name');
+        ).select('-password').populate('location_id', 'schoolName locationName baseUrl');
         console.log("<><>updatedAdmin", updatedAdmin);
         // Audit log
         await logAudit({
@@ -204,4 +219,4 @@ const deleteAdminById = async (req, res) => {
     }
 };
 
-module.exports = { getAllAdmins, getAdminById, updateAdminById, deleteAdminById };
+module.exports = { getAllAdmins, getAdminById, updateAdminById, deleteAdminById, getLocationsForAdmin };

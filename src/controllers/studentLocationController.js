@@ -1,7 +1,7 @@
 const studentLocation = require("../model/studentLocationModel");
 const UserSchema = require("../model/userModel")
 const AuditLog = require("../model/auditLogModel");
-const axios = require('axios');
+const axios = require("../utils/globalServiceClient");
 const { syncToGlobal, syncUpdateToGlobal } = require("../service/syncGlobalLocationService");
 const userModel = require("../model/userModel");
 exports.AddLocation1 = async (req, res) => {
@@ -29,7 +29,7 @@ exports.AddLocation1 = async (req, res) => {
     // }
 
     const payload = { name: schoolName, baseUrl: baseUrl, location: locationName }
-    const globalLocationRes = await axios.post(`${process.env.GLOBAL_URL}/api/location`, payload);
+    const globalLocationRes = await axios.post(`/api/location`, payload);
     const location = new studentLocation({
       locationName: checkLocationName,
       createdBy: req.user.id,
@@ -195,7 +195,7 @@ exports.updateLocation1 = async (req, res) => {
       baseUrl: baseUrl,
       location: locationName
     }
-    const globalLocationUpdateRes = await axios.put(`${process.env.GLOBAL_URL}/api/location/${existingLocation.global_location_id}`, payload);
+    const globalLocationUpdateRes = await axios.put(`/api/location/${existingLocation.global_location_id}`, payload);
     // --- 3. Prepare update data ---
     const updateData = { updatedBy: req.user.id };
     if (locationName) updateData.locationName = locationName.trim().toLowerCase();
@@ -365,7 +365,7 @@ exports.deleteLocation = async (req, res) => {
 
 exports.adminUpdateLocation = async (req, res) => {
   try {
-    const response = await axios.put(`${process.env.GLOBAL_URL}/api/location/${req.params.id}`, req.body)
+    const response = await axios.put(`/api/location/${req.params.id}`, req.body)
     if (response.data.status) {
       return res.status(200).send({ status: true, data: response.data.data, message: response.data.message })
     }

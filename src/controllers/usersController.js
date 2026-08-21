@@ -3,6 +3,8 @@ const bcrypt = require('bcrypt');
 const mongoose = require("mongoose");
 const logAudit = require("../utils/auditlogger");
 const userModel = require("../model/userModel");
+const studentLocationModel = require("../model/studentLocationModel");
+const escapeRegex = require("../utils/escapeRegex");
 const faceapi = require('face-api.js');
 const inmateModel = require("../model/studentModel");
 const { faceRecognitionService, faceRecognitionExcludeUserService } = require("../service/faceRecognitionService");
@@ -90,9 +92,24 @@ const createUser = async (req, res) => {
 const superAdminCreate = async (req, res) => {
     try {
         const { username, fullname, password, location_id } = req.body
-        const usernameExist = await userModel.findOne({username:{$regex:`^${username}$`,$options:"i"}})
+
+        if (!username || !fullname || !password) {
+            return res.status(400).send({ status: false, message: "username, fullname and password are required" });
+        }
+        if (!location_id) {
+            return res.status(400).send({ status: false, message: "location_id is required to assign this admin to a school" });
+        }
+        if (!mongoose.Types.ObjectId.isValid(location_id)) {
+            return res.status(400).send({ status: false, message: "Invalid location_id" });
+        }
+        const locationExists = await studentLocationModel.findById(location_id);
+        if (!locationExists) {
+            return res.status(404).send({ status: false, message: "Location not found" });
+        }
+
+        const usernameExist = await userModel.findOne({username:{$regex:`^${escapeRegex(username)}$`,$options:"i"}})
         if(usernameExist){
-            return res.status(400).send({status:false,message:`user name "${username}" already exist`});
+            return res.status(409).send({status:false,message:`user name "${username}" already exist`});
         }
         const hashPassword = await bcrypt.hash(password,10)
         const userData = {
@@ -100,10 +117,8 @@ const superAdminCreate = async (req, res) => {
             fullname,
             password:hashPassword,
             role:"ADMIN",
+            location_id,
             created_by: req.user?.id
-        }
-        if (location_id) {
-            userData.location_id = location_id
         }
 
         const newUser = new userModel(userData)

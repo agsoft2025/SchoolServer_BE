@@ -8,7 +8,7 @@ exports.fetchLocationStatus = async (req, res) => {
         const locationData = await axios.get(`${process.env.GLOBAL_URL}/api/subscribers/locations/stats`,{
             params:req.query,
             headers:{
-                Authorization:`Bear ${token}`
+                Authorization:`Bearer ${token}`
             }
         })
         return res.status(200).send(locationData.data)
@@ -26,7 +26,7 @@ exports.fetchLocationWiseData = async (req, res) => {
         const locationData = await axios.get(`${process.env.GLOBAL_URL}/api/subscribers/location/${req.params.locationId}`,{
             params:req.query,
             headers:{
-                Authorization:`Bear ${token}`
+                Authorization:`Bearer ${token}`
             }
         })
 
@@ -50,7 +50,7 @@ exports.subscriptionwiseHistory = async (req, res) => {
         const locationData = await axios.get(url,{
             params:req.query,
             headers:{
-                Authorization:`Bear ${token}`
+                Authorization:`Bearer ${token}`
             }
         })
         // const urlData = `${locationData.data.data[0].location.baseUrl}/student-pro/info/${req.params.studentId}`
