@@ -47,6 +47,7 @@ const { authenticateToken } = require('./middleware/authToken');
 const auditRequestLogger = require('./middleware/auditRequestLogger');
 const authRoutes = require("./routes/authRoutes")
 const adminRoutes = require("./routes/adminRoutes")
+const internalRoutes = require("./routes/internalRoutes")
 const cookieParser = require("cookie-parser");
 
 const defaultOrigins = [
@@ -92,6 +93,9 @@ app.use(morgan(":method :url :status :response-time ms"));
 app.use("/webhook", whatsapppRoutes)
 app.use("/user", authRoutes);
 app.use("/admin", adminRoutes);
+// Trusted server-to-server calls from the Global server (gated by INTERNAL_SERVICE_KEY,
+// see verifyInternalService) rather than an end-user session, so it stays outside authenticateToken.
+app.use("/internal", internalRoutes);
 
 app.use("/student-pro", studentRoutes);
 app.use("/student", authenticateToken, auditRequestLogger, studentRoutes);
