@@ -63,12 +63,14 @@ exports.AddLocation1 = async (req, res) => {
 
 exports.AddLocation = async (req, res) => {
   try {
-    const { locationName, schoolName, baseUrl, schoolCode = "NOT_SET" } = req.body;
+    const { locationName, schoolName, schoolCode = "NOT_SET" } = req.body;
+    // Base URL is no longer configured per location; one common URL is shared.
+    const baseUrl = req.body.baseUrl || process.env.COMMON_BASE_URL || "";
 
-    if (!locationName || !schoolName || !baseUrl) {
+    if (!locationName || !schoolName) {
       return res.status(400).json({
         success: false,
-        message: "Required fields missing"
+        message: "locationName and schoolName are required"
       });
     }
     // 1️⃣ Check if local already exists (ONE location rule)
@@ -260,6 +262,12 @@ exports.updateLocation = async (req, res) => {
       });
     }
 
+    // Defense in depth: a non-super-admin may only touch their own location.
+    const isSuperAdmin = String(req.user?.role || "").trim().toUpperCase().includes("SUPER");
+    if (!isSuperAdmin && String(req.user?.location_id || "") !== String(id)) {
+      return res.status(403).json({ success: false, message: "Unauthorized access" });
+    }
+
     // 2️⃣ Prepare local update
     const updateData = {
       updatedBy: req.user.id
@@ -341,6 +349,12 @@ exports.getAllLocation = async (req, res) => {
 exports.deleteLocation = async (req, res) => {
   try {
     const { id } = req.params;
+
+    // Defense in depth: a non-super-admin may only delete their own location.
+    const isSuperAdmin = String(req.user?.role || "").trim().toUpperCase().includes("SUPER");
+    if (!isSuperAdmin && String(req.user?.location_id || "") !== String(id)) {
+      return res.status(403).json({ success: false, message: "Unauthorized access" });
+    }
 
     const deletedLocation = await studentLocation.findByIdAndDelete(id);
 

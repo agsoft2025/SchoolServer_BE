@@ -58,7 +58,8 @@ const defaultOrigins = [
   "http://152.67.190.22",
   "https://agsoftsolutions.co.in",
   "https://global-server-fe.vercel.app",
-  "https://school.agsoftsolutions.co.in"
+  "https://school.agsoftsolutions.co.in",
+  "http://localhost:5175"
 ];
 const envOrigins = (process.env.CORS_ORIGINS || "")
   .split(",")
