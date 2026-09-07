@@ -13,7 +13,7 @@ const normalizePhone = (raw) => {
 // Resolves the target student list for a send request, scoped to the requesting
 // user's location (SUPER ADMIN may target any location explicitly), and de-duplicates
 // by phone number so siblings sharing a guardian number aren't texted twice.
-const resolveRecipients = async ({ mode, user, studentId, classIds, search, locationId }) => {
+const resolveRecipients = async ({ mode, user, studentId, classIds, hostelNames, search, locationId }) => {
   const locationFilter =
     user.role === 'SUPER ADMIN'
       ? locationId
@@ -29,6 +29,9 @@ const resolveRecipients = async ({ mode, user, studentId, classIds, search, loca
   } else if (mode === 'classwise') {
     if (!Array.isArray(classIds) || !classIds.length) return [];
     filter.class_info = { $in: classIds };
+  } else if (mode === 'hostelwise') {
+    if (!Array.isArray(hostelNames) || !hostelNames.length) return [];
+    filter.hostel_name = { $in: hostelNames };
   } else if (mode === 'bulk' && search) {
     filter.$or = [
       { student_name: { $regex: search, $options: 'i' } },

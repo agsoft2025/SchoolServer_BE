@@ -1,17 +1,13 @@
 const consoleProvider = require('./consoleProvider');
-// Real SMS integration not live yet (DLT/template registration pending). Uncomment
-// this line and the registry entry below once fast2sms is ready to go live.
-// const fast2smsProvider = require('./fast2smsProvider');
+const fast2smsProvider = require('./fast2smsProvider');
 
 const registry = {
   console: consoleProvider,
-  // fast2sms: fast2smsProvider,
+  fast2sms: fast2smsProvider,
 };
 
-const getActiveProvider = () => {
-  // Forced to console until fast2sms is uncommented above — every send prints to
-  // the terminal instead of going out, regardless of SMS_PROVIDER in .env.
-  return registry.console;
-};
+// Pick via SMS_PROVIDER in .env. Falls back to the console (mock) provider so a
+// missing/typo'd value never sends real SMS by accident.
+const getActiveProvider = () => registry[process.env.SMS_PROVIDER] || registry.console;
 
 module.exports = { getActiveProvider, registry };

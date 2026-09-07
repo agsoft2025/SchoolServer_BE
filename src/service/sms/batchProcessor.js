@@ -48,12 +48,25 @@ const processBatch = async (batchId, recipients, template) => {
         status: 'queued',
         provider: provider.name,
         location_id: recipient.locationId,
+        dlt_template_id: recipient.templateId,
+        dlt_variables: recipient.dltVariables,
       });
 
       try {
-        const result = await provider.send({ to: recipient.phone, message: text });
+        // When the recipient carries a DLT template + ordered variables, force
+        // the dlt route so this doesn't depend on FAST2SMS_ROUTE. Otherwise
+        // (console/dev) fall back to a plain rendered-text send.
+        const sendArgs = { to: recipient.phone, message: text };
+        if (recipient.templateId) {
+          sendArgs.route = 'dlt';
+          sendArgs.templateId = recipient.templateId;
+          sendArgs.variables = recipient.dltVariables;
+        }
+
+        const result = await provider.send(sendArgs);
         log.status = result.success ? 'sent' : 'failed';
         log.provider_response = result.raw;
+        log.provider_message_id = result.raw?.request_id;
         if (!result.success) log.error = result.error || 'Unknown provider error';
         await log.save();
         result.success ? sent++ : failed++;

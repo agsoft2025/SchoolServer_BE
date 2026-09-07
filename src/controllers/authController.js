@@ -129,14 +129,11 @@ exports.login = async (req, res) => {
             console.log("<><>otp",otp)
             console.log("<><>studentData",studentData)
             sendWhatsAppOTP(studentData.contact_number, otp, studentData.student_name)
-            // console.log("<><>studentData",studentData);
+                .catch((error) => console.error("WhatsApp OTP send failed:", error.message));
+            sendSMS(studentData.contact_number, otp, studentData.student_name)
+                .catch((error) => console.error("SMS OTP send failed:", error.message));
 
             await user.save();
-            //  const smsResponse = await sendSMS(otp, studentData.contact_number)
-
-            // if (!smsResponse.status) {
-            //     return res.status(400).send({ status: false, message: smsResponse.message })
-            // }
             await logAudit({
                 user: { id: user.id, username: user.username },
                 username: user.username,

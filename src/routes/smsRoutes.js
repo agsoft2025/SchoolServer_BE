@@ -1,12 +1,14 @@
 const express = require('express');
 const {
   getClassGroups,
+  getHostelGroups,
   previewRecipients,
   sendSms,
   getBatches,
   getBatchById,
   getBatchLogs,
   retryFailed,
+  getTemplates,
 } = require('../controllers/smsController');
 
 const router = express.Router();
@@ -22,7 +24,9 @@ const restrictToStaff = (req, res, next) => {
 
 router.use(restrictToStaff);
 
+router.get('/templates', getTemplates);
 router.get('/class-groups', getClassGroups);
+router.get('/hostel-groups', getHostelGroups);
 router.post('/preview', previewRecipients);
 router.post('/send', sendSms);
 router.get('/batches', getBatches);

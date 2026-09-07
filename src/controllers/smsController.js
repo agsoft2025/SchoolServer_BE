@@ -5,22 +5,38 @@ const SmsLog = require('../model/smsLogModel');
 const { resolveRecipients } = require('../service/sms/recipientResolver');
 const { processBatch } = require('../service/sms/batchProcessor');
 const { getActiveProvider } = require('../service/sms/providers');
-const { findUnknownPlaceholders } = require('../service/sms/templateEngine');
+const { renderTemplate, findUnknownPlaceholders } = require('../service/sms/templateEngine');
+const smsTemplates = require('../config/smsTemplates');
 
-const MODES = ['individual', 'bulk', 'classwise'];
+const MODES = ['individual', 'bulk', 'classwise', 'hostelwise'];
 
 const canAccessLocation = (user, locationId) => user.role === 'SUPER ADMIN' || String(locationId) === String(user.location_id);
 
-const validateSendPayload = ({ mode, message, studentId, classIds }) => {
-  if (!MODES.includes(mode)) return 'Invalid mode. Must be individual, bulk or classwise';
-  if (!message || !message.trim()) return 'Message is required';
-  if (mode === 'individual' && !studentId) return 'studentId is required for individual mode';
-  if (mode === 'classwise' && (!Array.isArray(classIds) || !classIds.length)) return 'classIds is required for classwise mode';
+const findTemplate = (id) => smsTemplates.find((t) => String(t.id) === String(id));
 
-  const unknown = findUnknownPlaceholders(message);
-  if (unknown.length) return `Unknown placeholder(s): ${unknown.map((key) => `{{${key}}}`).join(', ')}`;
+// Name of the first 'input' variable the caller has not filled, or null.
+const missingInputVar = (template, inputVars) => {
+  const missing = (template.variables || []).find(
+    (v) => v.source === 'input' && !String(inputVars?.[v.key] ?? '').trim()
+  );
+  return missing ? missing.label || missing.key : null;
+};
 
-  return null;
+// Build the ordered Fast2SMS variable list for one recipient + a readable
+// preview of the fully-rendered message (stored on the batch/log for history).
+const buildTemplateMessage = (template, studentVars, inputVars) => {
+  const values = (template.variables || []).map((v) =>
+    v.source === 'input'
+      ? String(inputVars?.[v.key] ?? '').trim()
+      : String(studentVars?.[v.source] ?? '').trim()
+  );
+
+  let preview = template.body;
+  (template.variables || []).forEach((v, i) => {
+    preview = preview.split(`{{${v.key}}}`).join(values[i] || '');
+  });
+
+  return { values, preview };
 };
 
 exports.getClassGroups = async (req, res) => {
@@ -55,12 +71,34 @@ exports.getClassGroups = async (req, res) => {
   }
 };
 
+exports.getHostelGroups = async (req, res) => {
+  try {
+    const locationFilter =
+      req.user.role === 'SUPER ADMIN'
+        ? req.query.location_id
+          ? { location_id: new mongoose.Types.ObjectId(req.query.location_id) }
+          : {}
+        : { location_id: new mongoose.Types.ObjectId(req.user.location_id) };
+
+    const groups = await studentModel.aggregate([
+      { $match: { isDeleted: { $ne: true }, hostel_name: { $nin: [null, ''] }, ...locationFilter } },
+      { $group: { _id: '$hostel_name', count: { $sum: 1 } } },
+      { $project: { _id: 0, hostel_name: '$_id', count: 1 } },
+      { $sort: { hostel_name: 1 } },
+    ]);
+
+    res.json({ success: true, data: groups });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Failed to load hostel groups', error: error.message });
+  }
+};
+
 exports.previewRecipients = async (req, res) => {
   try {
-    const { mode, studentId, classIds, search, locationId } = req.body;
+    const { mode, studentId, classIds, hostelNames, search, locationId } = req.body;
     if (!MODES.includes(mode)) return res.status(400).json({ success: false, message: 'Invalid mode' });
 
-    const recipients = await resolveRecipients({ mode, user: req.user, studentId, classIds, search, locationId });
+    const recipients = await resolveRecipients({ mode, user: req.user, studentId, classIds, hostelNames, search, locationId });
 
     res.json({
       success: true,
@@ -72,34 +110,83 @@ exports.previewRecipients = async (req, res) => {
   }
 };
 
+exports.getTemplates = (req, res) => {
+  res.json({ success: true, data: smsTemplates });
+};
+
 exports.sendSms = async (req, res) => {
   try {
-    const { mode, message, studentId, classIds, search, locationId } = req.body;
+    const { mode, message, templateId, variables: inputVars, studentId, classIds, hostelNames, search, locationId } = req.body;
 
-    const validationError = validateSendPayload({ mode, message, studentId, classIds });
-    if (validationError) return res.status(400).json({ success: false, message: validationError });
+    if (!MODES.includes(mode)) {
+      return res.status(400).json({ success: false, message: 'Invalid mode. Must be individual, bulk, classwise or hostelwise' });
+    }
+    if (mode === 'individual' && !studentId) {
+      return res.status(400).json({ success: false, message: 'studentId is required for individual mode' });
+    }
+    if (mode === 'classwise' && (!Array.isArray(classIds) || !classIds.length)) {
+      return res.status(400).json({ success: false, message: 'classIds is required for classwise mode' });
+    }
+    if (mode === 'hostelwise' && (!Array.isArray(hostelNames) || !hostelNames.length)) {
+      return res.status(400).json({ success: false, message: 'hostelNames is required for hostelwise mode' });
+    }
 
-    const recipients = await resolveRecipients({ mode, user: req.user, studentId, classIds, search, locationId });
+    const provider = getActiveProvider();
+    const template = templateId ? findTemplate(templateId) : null;
+
+    if (templateId && !template) {
+      return res.status(400).json({ success: false, message: 'Unknown SMS template' });
+    }
+    // The live provider can only send content that matches an approved DLT
+    // template; a raw free-text message is allowed only on the console (mock)
+    // provider used for local testing.
+    if (provider.name !== 'console' && !template) {
+      return res.status(400).json({ success: false, message: 'Select an approved SMS template before sending' });
+    }
+
+    if (template) {
+      const missing = missingInputVar(template, inputVars);
+      if (missing) return res.status(400).json({ success: false, message: `Please fill "${missing}"` });
+    } else {
+      if (!message || !message.trim()) return res.status(400).json({ success: false, message: 'Message is required' });
+      const unknown = findUnknownPlaceholders(message);
+      if (unknown.length) {
+        return res
+          .status(400)
+          .json({ success: false, message: `Unknown placeholder(s): ${unknown.map((k) => `{{${k}}}`).join(', ')}` });
+      }
+    }
+
+    const recipients = await resolveRecipients({ mode, user: req.user, studentId, classIds, hostelNames, search, locationId });
     if (!recipients.length) {
       return res.status(404).json({ success: false, message: 'No recipients matched your selection' });
     }
 
-    const provider = getActiveProvider();
+    // Resolve each recipient's final text + ordered DLT variables up front, then
+    // hand pre-rendered recipients to processBatch (template arg stays null, the
+    // same shape the retry path already uses).
+    const prepared = recipients.map((r) => {
+      if (!template) return { ...r, message: renderTemplate(message, r.variables || {}) };
+      const { values, preview } = buildTemplateMessage(template, r.variables, inputVars);
+      return { ...r, templateId: String(template.id), dltVariables: values, message: preview };
+    });
+
     const batchLocationId = req.user.role === 'SUPER ADMIN' ? locationId || recipients[0]?.locationId : req.user.location_id;
 
     const batch = await SmsBatch.create({
       mode,
-      message,
+      message: prepared[0].message,
       provider: provider.name,
-      filters: { studentId, classIds, search, locationId },
-      totalRecipients: recipients.length,
+      dlt_template_id: template ? String(template.id) : undefined,
+      filters: { studentId, classIds, hostelNames, search, locationId, templateId, variables: inputVars },
+      totalRecipients: prepared.length,
       status: 'processing',
       location_id: batchLocationId,
       created_by: req.user.id,
     });
 
     // Fire-and-forget: response returns immediately with the batch id, FE polls for progress.
-    processBatch(batch._id, recipients, message).catch((error) => {
+    processBatch(batch._id, prepared, null).catch((error) => {
       console.error('SMS batch processing failed:', batch._id, error);
       SmsBatch.updateOne({ _id: batch._id }, { $set: { status: 'failed' } }).catch(() => {});
     });
@@ -108,7 +195,7 @@ exports.sendSms = async (req, res) => {
       success: true,
       message: 'SMS batch queued for sending',
       batchId: batch._id,
-      totalRecipients: recipients.length,
+      totalRecipients: prepared.length,
       provider: provider.name,
     });
   } catch (error) {
@@ -205,6 +292,8 @@ exports.retryFailed = async (req, res) => {
       phone: log.phone,
       locationId: log.location_id,
       message: log.message,
+      templateId: log.dlt_template_id,
+      dltVariables: log.dlt_variables,
       variables: { student_name: log.recipient_name },
     }));
 

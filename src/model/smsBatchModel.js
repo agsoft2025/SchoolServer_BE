@@ -2,9 +2,10 @@ const mongoose = require('mongoose');
 
 const smsBatchSchema = new mongoose.Schema(
   {
-    mode: { type: String, enum: ['individual', 'bulk', 'classwise'], required: true },
+    mode: { type: String, enum: ['individual', 'bulk', 'classwise', 'hostelwise'], required: true },
     message: { type: String, required: true },
     provider: { type: String, required: true },
+    dlt_template_id: { type: String },
     filters: { type: mongoose.Schema.Types.Mixed },
     totalRecipients: { type: Number, default: 0 },
     sentCount: { type: Number, default: 0 },
