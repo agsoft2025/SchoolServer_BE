@@ -13,6 +13,8 @@ const smsLogSchema = new mongoose.Schema(
     provider_message_id: { type: String },
     dlt_template_id: { type: String },
     dlt_variables: { type: [String] },
+    template_key: { type: String },
+    template_version: { type: Number },
     error: { type: String },
     location_id: { type: mongoose.Schema.Types.ObjectId, ref: 'StudentLocation' },
   },

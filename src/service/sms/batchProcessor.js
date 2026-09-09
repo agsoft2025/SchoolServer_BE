@@ -50,6 +50,8 @@ const processBatch = async (batchId, recipients, template) => {
         location_id: recipient.locationId,
         dlt_template_id: recipient.templateId,
         dlt_variables: recipient.dltVariables,
+        template_key: recipient.templateKey,
+        template_version: recipient.templateVersion,
       });
 
       try {

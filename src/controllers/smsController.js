@@ -5,39 +5,23 @@ const SmsLog = require('../model/smsLogModel');
 const { resolveRecipients } = require('../service/sms/recipientResolver');
 const { processBatch } = require('../service/sms/batchProcessor');
 const { getActiveProvider } = require('../service/sms/providers');
-const { renderTemplate, findUnknownPlaceholders } = require('../service/sms/templateEngine');
-const smsTemplates = require('../config/smsTemplates');
+const { getActiveTemplates, findActiveTemplate } = require('../service/sms/templateRegistry');
+const { validateValues, assembleMessage } = require('../service/sms/dltAssembler');
 
 const MODES = ['individual', 'bulk', 'classwise', 'hostelwise'];
 
 const canAccessLocation = (user, locationId) => user.role === 'SUPER ADMIN' || String(locationId) === String(user.location_id);
 
-const findTemplate = (id) => smsTemplates.find((t) => String(t.id) === String(id));
-
-// Name of the first 'input' variable the caller has not filled, or null.
-const missingInputVar = (template, inputVars) => {
-  const missing = (template.variables || []).find(
-    (v) => v.source === 'input' && !String(inputVars?.[v.key] ?? '').trim()
+// Ordered value list for a template's {#...#} slots.
+//   'input'  fields come from the sender's form (identical for every recipient)
+//   'record' fields come from the resolved student record and are NOT settable
+//            by the sender (name, class, etc.)
+const buildValues = (template, recordVars, inputVars) =>
+  (template.fields || []).map((f) =>
+    f.source === 'record'
+      ? String(recordVars?.[f.key] ?? '').trim()
+      : String(inputVars?.[f.key] ?? '').trim()
   );
-  return missing ? missing.label || missing.key : null;
-};
-
-// Build the ordered Fast2SMS variable list for one recipient + a readable
-// preview of the fully-rendered message (stored on the batch/log for history).
-const buildTemplateMessage = (template, studentVars, inputVars) => {
-  const values = (template.variables || []).map((v) =>
-    v.source === 'input'
-      ? String(inputVars?.[v.key] ?? '').trim()
-      : String(studentVars?.[v.source] ?? '').trim()
-  );
-
-  let preview = template.body;
-  (template.variables || []).forEach((v, i) => {
-    preview = preview.split(`{{${v.key}}}`).join(values[i] || '');
-  });
-
-  return { values, preview };
-};
 
 exports.getClassGroups = async (req, res) => {
   try {
@@ -110,13 +94,40 @@ exports.previewRecipients = async (req, res) => {
   }
 };
 
-exports.getTemplates = (req, res) => {
-  res.json({ success: true, data: smsTemplates });
+// School Admin: read-only list of approved, ACTIVE SCHOOL templates. The DLT
+// template id is deliberately NOT exposed — the sender must not see or change it.
+exports.getTemplates = async (req, res) => {
+  try {
+    const templates = await getActiveTemplates();
+    res.json({
+      success: true,
+      data: templates.map((t) => ({
+        id: t.id,
+        key: t.key,
+        name: t.name,
+        domain: t.domain,
+        approvedText: t.approvedText,
+        placeholderCount: t.placeholderCount,
+        version: t.version,
+        fields: (t.fields || []).map((f) => ({
+          key: f.key,
+          label: f.label,
+          type: f.type,
+          maxLength: f.maxLength,
+          required: f.required,
+          source: f.source,
+        })),
+      })),
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Failed to load SMS templates', error: error.message });
+  }
 };
 
 exports.sendSms = async (req, res) => {
   try {
-    const { mode, message, templateId, variables: inputVars, studentId, classIds, hostelNames, search, locationId } = req.body;
+    console.log("<><>working",req.body);
+    const { mode, templateId, variables: inputVars, studentId, classIds, hostelNames, search, locationId } = req.body;
 
     if (!MODES.includes(mode)) {
       return res.status(400).json({ success: false, message: 'Invalid mode. Must be individual, bulk, classwise or hostelwise' });
@@ -131,45 +142,66 @@ exports.sendSms = async (req, res) => {
       return res.status(400).json({ success: false, message: 'hostelNames is required for hostelwise mode' });
     }
 
-    const provider = getActiveProvider();
-    const template = templateId ? findTemplate(templateId) : null;
-
-    if (templateId && !template) {
-      return res.status(400).json({ success: false, message: 'Unknown SMS template' });
+    // A DLT-approved template is mandatory — there is no free-text send path.
+    if (!templateId) {
+      return res.status(400).json({ success: false, message: 'An SMS template must be selected' });
     }
-    // The live provider can only send content that matches an approved DLT
-    // template; a raw free-text message is allowed only on the console (mock)
-    // provider used for local testing.
-    if (provider.name !== 'console' && !template) {
-      return res.status(400).json({ success: false, message: 'Select an approved SMS template before sending' });
+    const template = await findActiveTemplate(templateId);
+    console.log("template",template);  
+    if (!template) {
+      return res
+        .status(400)
+        .json({ success: false, message: 'Selected template is not available (inactive, deleted, or not a SCHOOL template)' });
+    }
+    if (!template.dltTemplateId) {
+      return res.status(400).json({ success: false, message: 'Template has no DLT Template ID configured; cannot send' });
     }
 
-    if (template) {
-      const missing = missingInputVar(template, inputVars);
-      if (missing) return res.status(400).json({ success: false, message: `Please fill "${missing}"` });
-    } else {
-      if (!message || !message.trim()) return res.status(400).json({ success: false, message: 'Message is required' });
-      const unknown = findUnknownPlaceholders(message);
-      if (unknown.length) {
-        return res
-          .status(400)
-          .json({ success: false, message: `Unknown placeholder(s): ${unknown.map((k) => `{{${k}}}`).join(', ')}` });
+    const inputFieldSpecs = (template.fields || []).filter((f) => f.source === 'input');
+    const inputKeys = new Set(inputFieldSpecs.map((f) => f.key));
+
+    // Reject unexpected fields — anything submitted that the template doesn't declare.
+    const extra = Object.keys(inputVars || {}).filter((k) => !inputKeys.has(k));
+    if (extra.length) {
+      return res.status(400).json({ success: false, message: `Unexpected field(s): ${extra.join(', ')}` });
+    }
+
+    // Validate sender-provided values once (fail fast, before any recipient work).
+    for (const f of inputFieldSpecs) {
+      const v = String(inputVars?.[f.key] ?? '').trim();
+      if (f.required && !v) return res.status(400).json({ success: false, message: `Please fill "${f.label}"` });
+      if (v && v.length > (f.maxLength || 30)) {
+        return res.status(400).json({ success: false, message: `"${f.label}" exceeds ${f.maxLength || 30} characters` });
       }
     }
+
+    const provider = getActiveProvider();
 
     const recipients = await resolveRecipients({ mode, user: req.user, studentId, classIds, hostelNames, search, locationId });
     if (!recipients.length) {
       return res.status(404).json({ success: false, message: 'No recipients matched your selection' });
     }
 
-    // Resolve each recipient's final text + ordered DLT variables up front, then
-    // hand pre-rendered recipients to processBatch (template arg stays null, the
-    // same shape the retry path already uses).
-    const prepared = recipients.map((r) => {
-      if (!template) return { ...r, message: renderTemplate(message, r.variables || {}) };
-      const { values, preview } = buildTemplateMessage(template, r.variables, inputVars);
-      return { ...r, templateId: String(template.id), dltVariables: values, message: preview };
-    });
+    // Assemble every recipient's final message on the backend from the approved
+    // text + validated ordered values. The client never builds the final SMS.
+    const prepared = [];
+    for (const r of recipients) {
+      const values = buildValues(template, r.variables, inputVars);
+      const check = validateValues(template.approvedText, values, template.fields);
+      if (!check.ok) {
+        return res
+          .status(400)
+          .json({ success: false, message: `${r.variables?.student_name || r.phone}: ${check.error}` });
+      }
+      prepared.push({
+        ...r,
+        templateId: template.dltTemplateId, // real DLT numeric id passed to Fast2SMS
+        dltVariables: values,
+        message: assembleMessage(template.approvedText, values),
+        templateKey: template.key,
+        templateVersion: template.version,
+      });
+    }
 
     const batchLocationId = req.user.role === 'SUPER ADMIN' ? locationId || recipients[0]?.locationId : req.user.location_id;
 
@@ -177,7 +209,10 @@ exports.sendSms = async (req, res) => {
       mode,
       message: prepared[0].message,
       provider: provider.name,
-      dlt_template_id: template ? String(template.id) : undefined,
+      dlt_template_id: template.dltTemplateId,
+      template_key: template.key,
+      template_version: template.version,
+      template_name: template.name,
       filters: { studentId, classIds, hostelNames, search, locationId, templateId, variables: inputVars },
       totalRecipients: prepared.length,
       status: 'processing',
@@ -199,6 +234,7 @@ exports.sendSms = async (req, res) => {
       provider: provider.name,
     });
   } catch (error) {
+    console.log("error",error)
     res.status(500).json({ success: false, message: 'Failed to send SMS', error: error.message });
   }
 };
@@ -294,6 +330,8 @@ exports.retryFailed = async (req, res) => {
       message: log.message,
       templateId: log.dlt_template_id,
       dltVariables: log.dlt_variables,
+      templateKey: log.template_key,
+      templateVersion: log.template_version,
       variables: { student_name: log.recipient_name },
     }));
 
