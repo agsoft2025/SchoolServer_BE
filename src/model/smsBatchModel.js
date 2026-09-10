@@ -6,6 +6,7 @@ const smsBatchSchema = new mongoose.Schema(
     message: { type: String, required: true },
     provider: { type: String, required: true },
     dlt_template_id: { type: String },
+    sender_id: { type: String },
     template_key: { type: String },
     template_version: { type: Number },
     template_name: { type: String },
