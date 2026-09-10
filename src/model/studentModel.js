@@ -20,7 +20,10 @@ const studentSchema = new mongoose.Schema({
   class_info: { type: mongoose.Schema.Types.ObjectId, ref: 'ClassInfo' },
   pro_pic: { type: mongoose.Schema.Types.ObjectId, ref: 'StudentFile' },
   location_id: { type: mongoose.Schema.Types.ObjectId, ref: 'StudentLocation', required: true },
-  user_id: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true }
+  user_id: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+  created_by: { type: mongoose.Schema.Types.ObjectId, ref: 'User',required:true },
+  updated_by: { type: mongoose.Schema.Types.ObjectId, ref: 'User',required:true },
+  isDeleted: { type: Boolean, default: false }
 }, { timestamps: true });
 
 module.exports = mongoose.model('Student', studentSchema);

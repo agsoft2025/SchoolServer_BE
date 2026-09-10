@@ -12,9 +12,10 @@ const moment = require('moment');
 
 const downloadWagesCSV1 = async (req, res) => {
   try {
-    const studentData = await studentModel.find()
+    const locationFilter = req.user.role === 'SUPER ADMIN' ? {} : { location_id: req.user.location_id };
+    const studentData = await studentModel.find(locationFilter)
     if (!studentData || studentData.length === 0) {
-      return res.status(404).json({ message: 'No wage records found to export' });
+      return res.status(404).json({ success: false, message: 'There is no record found to export' });
     }
     const formattedData = studentData.map(student => ({
       registration_number: student.registration_number,
@@ -48,11 +49,12 @@ const downloadWagesCSV1 = async (req, res) => {
 
 const downloadWagesCSV2 = async (req, res) => {
   try {
-    const {student_id,format} = req.query
+    const { student_id, format } = req.query
     let financialData;
+    const locationFilter = req.user.role === 'SUPER ADMIN' ? {} : { location_id: req.user.location_id };
     if (student_id) {
       financialData = await financialModel
-        .find({ student_id })
+        .find({ student_id, ...locationFilter })
         .populate("student_id");
       financialData.sort((a, b) =>
         a.student_id.registration_number.localeCompare(b.student_id.registration_number)
@@ -60,6 +62,7 @@ const downloadWagesCSV2 = async (req, res) => {
 
     } else {
       financialData = await financialModel.aggregate([
+        { $match: locationFilter },
         {
           $lookup: {
             from: "students",
@@ -75,7 +78,7 @@ const downloadWagesCSV2 = async (req, res) => {
 
 
     if (!financialData || financialData.length === 0) {
-      return res.status(404).json({ message: 'No wage records found to export' });
+      return res.status(404).json({ success: false, message: 'There is no record found to export' });
     }
 
     // fetch all data 
@@ -86,7 +89,7 @@ const downloadWagesCSV2 = async (req, res) => {
       current_balace: student.student_id.deposite_amount,
       depositor_name: student.depositedBy,
       contact_number: student.contactNumber,
-       created_at: moment(student.createdAt).format('YYYY-MM-DD HH:mm:ss')
+      created_at: moment(student.createdAt).format('YYYY-MM-DD HH:mm:ss')
     }))
 
     const fields = [
@@ -95,8 +98,7 @@ const downloadWagesCSV2 = async (req, res) => {
       'depositAmount',
       'current_balace',
       'depositor_name',
-      'contact_number',
-      'created_at'
+      'contact_number'
     ];
 
 
@@ -116,11 +118,12 @@ const downloadWagesCSV2 = async (req, res) => {
 const downloadWagesCSV = async (req, res) => {
   try {
     const { student_id, format } = req.query;
+    const locationFilter = req.user.role === 'SUPER ADMIN' ? {} : { location_id: req.user.location_id };
     let financialData;
 
     if (student_id) {
       financialData = await financialModel
-        .find({ student_id })
+        .find({ student_id, ...locationFilter })
         .populate("student_id");
 
       financialData.sort((a, b) =>
@@ -128,6 +131,7 @@ const downloadWagesCSV = async (req, res) => {
       );
     } else {
       financialData = await financialModel.aggregate([
+        { $match: locationFilter },
         {
           $lookup: {
             from: "students",
@@ -172,8 +176,7 @@ const downloadWagesCSV = async (req, res) => {
       'depositAmount',
       'current_balance',
       'depositor_name',
-      'contact_number',
-      'created_at'
+      'contact_number'
     ];
 
     const json2csvParser = new Parser({ fields });
@@ -287,7 +290,7 @@ const createFinancial1 = async (req, res) => {
 
     const inmate = await InmateSchema.findOne({ inmateId });
     if (!inmate) {
-      return res.status(404).json({ message: "Inmate not found" });
+      return res.status(404).json({ message: "Student not found" });
     }
 
     let amountToAdd = 0;
@@ -327,7 +330,7 @@ const createFinancial1 = async (req, res) => {
       action: 'CREATE',
       targetModel: 'Financial',
       targetId: savedFinancial._id,
-      description: `Created ${type} record for inmate ${inmateId}`,
+      description: `Created ${type} record for student ${inmateId}`,
       changes: { ...req.body, custodyType: inmate.custodyType }
     });
 
@@ -431,7 +434,8 @@ const createFinancial = async (req, res) => {
       depositedBy,
       depositedById: depositedById || null,
       contactNumber: contactNumber || null,
-      remarks: remarks || null
+      remarks: remarks || null,
+      location_id: req.user.role === 'SUPER ADMIN' ? req.body.location_id : req.user.location_id
     });
 
     const savedFinancial = await financial.save();
@@ -474,7 +478,8 @@ const createFinancial = async (req, res) => {
 
 const getFinancial = async (req, res) => {
   try {
-    const inmates = await FinancialSchema.find().sort({ createdAt: -1 });
+    const locationFilter = req.user.role === 'SUPER ADMIN' ? {} : { location_id: req.user.location_id };
+    const inmates = await FinancialSchema.find(locationFilter).sort({ createdAt: -1 });
     if (!inmates) {
       return res.status(404).json({ success: false, message: "No data found", data: [] })
     }
@@ -544,7 +549,7 @@ const updateFinancial = async (req, res) => {
       action: 'UPDATE',
       targetModel: 'Financial',
       targetId: id,
-      description: `Updated financial record for inmate ${updatedFinancial.inmateId}`,
+      description: `Updated financial record for Student ${updatedFinancial.inmateId}`,
       changes: updatedFinancial
     });
     res.status(200).json({ success: true, data: updatedFinancial, message: "Financial update successfully" })
@@ -573,7 +578,7 @@ const deleteFinancial = async (req, res) => {
       action: 'DELETE',
       targetModel: 'Financial',
       targetId: updatedFinancial._id,
-      description: `Deleted financial record for inmate ${updatedFinancial.inmateId}`,
+      description: `Deleted financial record for student ${updatedFinancial.inmateId}`,
       changes: updatedFinancial.toObject()
     });
 
@@ -593,12 +598,19 @@ const searchFinancial = async (req, res) => {
 
     const regex = new RegExp(query, "i"); // 'i' makes it case-insensitive
 
+    const locationFilter = req.user.role === 'SUPER ADMIN' ? {} : { location_id: req.user.location_id };
+
     const results = await FinancialSchema.find({
-      $or: [
-        { inmateId: regex },
-        { firstName: regex },
-        { lastName: regex },
-        { cellNumber: regex },
+      $and: [
+        locationFilter,
+        {
+          $or: [
+            { inmateId: regex },
+            { firstName: regex },
+            { lastName: regex },
+            { cellNumber: regex },
+          ]
+        }
       ]
     });
 

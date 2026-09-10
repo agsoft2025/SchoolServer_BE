@@ -11,6 +11,7 @@ exports.getVendorPurchaseSummary1 = async (query) => {
     sortOrder = -1,
     page = 1,
     limit = 10,
+    location_id,
   } = query;
 
   const pageNum  = Number(page)  || 1;
@@ -52,6 +53,7 @@ exports.getVendorPurchaseSummary1 = async (query) => {
         ...(Object.keys(dateFilter).length && {
           "vendorPurchase.date": dateFilter,
         }),
+        ...vendorMatch
       },
     },
 
@@ -96,15 +98,19 @@ exports.getVendorPurchaseSummary = async (query) => {
     sortOrder = -1,
     page = 1,
     limit = 10,
+    location_id,
   } = query;
 
   const pageNum  = Number(page)  || 1;
   const limitNum = Number(limit) || 10;
 
-  // Date range filter
+  // Date & Location filter
   const dateFilter = {};
   if (startDate) dateFilter.$gte = new Date(startDate);
   if (endDate)   dateFilter.$lte = new Date(endDate);
+
+  const vendorMatch = {};
+  if (location_id) vendorMatch["vendorPurchase.location_id"] = new mongoose.Types.ObjectId(location_id);
 
   const pipeline = [
     {
@@ -137,6 +143,7 @@ exports.getVendorPurchaseSummary = async (query) => {
         ...(Object.keys(dateFilter).length && {
           "vendorPurchase.date": dateFilter,
         }),
+        ...vendorMatch
       },
     },
 

@@ -20,8 +20,7 @@ const hostname = '0.0.0.0';
 // <<<=== END ===>>>
 
 app.use(express.json());
-app.use('/uploads', express.static(path.join(__dirname,'..', 'uploads')));
-const authRoutes = require("./routes/authRoutes");
+app.use('/uploads', express.static(path.join(__dirname, '..', 'uploads')));
 const studentRoutes = require("./routes/studentRoutes");
 const financialRoutes = require("./routes/financialRoutes");
 const tuckShopRoutes = require("./routes/tuckShopRoutes");
@@ -31,7 +30,6 @@ const transactionRoutes = require("./routes/transactionRoutes");
 const dashboardRoutes = require("./routes/dashboardRoutes");
 const reportRoutes = require("./routes/reportRoutes");
 const auditLogsRoutes = require("./routes/auditRoutes");
-const authenticateToken = require("./middleware/authToken");
 const bulkOperations = require("./routes/bulkOprationRoutes");
 const departmentRoles = require("./routes/departmentRoutes");
 const studentLocationRoutes = require('./routes/studentLocationRoutes')
@@ -42,10 +40,32 @@ const paymentRoutes = require("./routes/paymentRoutes")
 const faceRouted = require("./routes/faceRecognationRoute")
 const globalRoutes = require("./routes/globalServerRoutes")
 const whatsapppRoutes = require("./routes/whatsappRoutes")
+const smsRoutes = require("./routes/smsRoutes")
 const morgan = require("morgan");
 const { sendSMS, sendWhatsAppOTP } = require('./service/sms.service');
+const { authenticateToken } = require('./middleware/authToken');
+const auditRequestLogger = require('./middleware/auditRequestLogger');
+const authRoutes = require("./routes/authRoutes")
+const adminRoutes = require("./routes/adminRoutes")
+const internalRoutes = require("./routes/internalRoutes")
+const cookieParser = require("cookie-parser");
 
-// const allowedOrigins = ["http://localhost:5173"]
+const defaultOrigins = [
+  "http://localhost:5173",
+  "http://localhost:5174",
+  "http://152.67.190.22:3000",
+  "http://agsoftsolutions.co.in",
+  "http://152.67.190.22",
+  "https://agsoftsolutions.co.in",
+  "https://global-server-fe.vercel.app",
+  "https://school.agsoftsolutions.co.in",
+  "http://localhost:5175"
+];
+const envOrigins = (process.env.CORS_ORIGINS || "")
+  .split(",")
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+const allowedOrigins = [...new Set([...defaultOrigins, ...envOrigins])];
 
 // const corsOptionsDelegate = function (req, callback) {
 //     let corsOptions;
@@ -57,38 +77,57 @@ const { sendSMS, sendWhatsAppOTP } = require('./service/sms.service');
 //     callback(null, corsOptions);
 // };
 
-app.use(cors());
+app.set("trust proxy", 1);
+
+app.use(cors({
+  origin(origin, callback) {
+    if (!origin || allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+
+    return callback(new Error("Not allowed by CORS"));
+  },
+  credentials: true
+}));
+app.use(cookieParser());
 app.use(morgan(":method :url :status :response-time ms"));
-app.use("/webhook",whatsapppRoutes)
+app.use("/webhook", whatsapppRoutes)
 app.use("/user", authRoutes);
+app.use("/admin", adminRoutes);
+// Trusted server-to-server calls from the Global server (gated by INTERNAL_SERVICE_KEY,
+// see verifyInternalService) rather than an end-user session, so it stays outside authenticateToken.
+app.use("/internal", internalRoutes);
 
 app.use("/student-pro", studentRoutes);
-app.use("/student", authenticateToken, studentRoutes);
-app.use("/financial", authenticateToken, financialRoutes);
-app.use("/tuck-shop", authenticateToken, tuckShopRoutes);
-app.use("/pos-shop-cart", authenticateToken, cartRoutes);
-app.use("/users", authenticateToken, userRoutes);
-app.use("/faceRecognition",userRoutes)
-app.use("/transactions", authenticateToken, transactionRoutes);
-app.use("/dashboard", authenticateToken, dashboardRoutes);
-app.use("/reports", authenticateToken, reportRoutes);
-app.use("/logs", authenticateToken, auditLogsRoutes);
-app.use("/bulk-oprations", authenticateToken, bulkOperations);
-app.use("/department", authenticateToken, departmentRoles);
-app.use("/location", studentLocationRoutes)
+app.use("/student", authenticateToken, auditRequestLogger, studentRoutes);
+app.use("/financial", authenticateToken, auditRequestLogger, financialRoutes);
+app.use("/tuck-shop", authenticateToken, auditRequestLogger, tuckShopRoutes);
+app.use("/pos-shop-cart", authenticateToken, auditRequestLogger, cartRoutes);
+app.use("/users", authenticateToken, auditRequestLogger, userRoutes);
+app.use("/faceRecognition", userRoutes)
+app.use("/dashboard", authenticateToken, auditRequestLogger, dashboardRoutes);
+app.use("/reports", authenticateToken, auditRequestLogger, reportRoutes);
+app.use("/logs", authenticateToken, auditRequestLogger, auditLogsRoutes);
+app.use("/bulk-oprations", authenticateToken, auditRequestLogger, bulkOperations);
+app.use("/department", authenticateToken, auditRequestLogger, departmentRoles);
+app.use("/location", authenticateToken, auditRequestLogger, studentLocationRoutes)
 // inventory and canteen operation
-app.use('/inventory',authenticateToken,inventoryRoutes)
-app.use("/backup",authenticateToken,backupRoutes)
-app.use("/upload",authenticateToken,fileUploadRoutes)
-app.use("/payment",paymentRoutes)
-app.use("/face",faceRouted)
-app.use("/api/subscribers",globalRoutes)
-
+app.use('/inventory', authenticateToken, auditRequestLogger, inventoryRoutes)
+app.use("/backup", authenticateToken, auditRequestLogger, backupRoutes)
+app.use("/upload", authenticateToken, auditRequestLogger, fileUploadRoutes)
+app.use("/payment", authenticateToken, auditRequestLogger, paymentRoutes)
+app.use("/face", authenticateToken, auditRequestLogger, faceRouted)
+app.use("/api/subscribers", authenticateToken, auditRequestLogger, globalRoutes)
+app.use("/sms", authenticateToken, auditRequestLogger, smsRoutes)
+app.use("/", (req, res) => {
+  res.status(200).json({ message: "Welcome to School Server API v.1.0.0" });
+});
 // sendWhatsAppOTP("918139886630","813988")
 // sendWhatsAppOTP("+918940891631","813988")
 
 
 app.listen(process.env.PORT, hostname, () => {
-    console.log(`server running successfully on ${process.env.PORT}`)
-    console.log('Running in', process.env.NODE_ENV, 'mode');
+  console.log(`server running successfully on ${process.env.PORT}`)
+  console.log('Running in', process.env.NODE_ENV, 'mode');
 })
+app.use("/transactions", authenticateToken, auditRequestLogger, transactionRoutes);

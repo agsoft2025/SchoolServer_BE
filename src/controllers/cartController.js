@@ -13,12 +13,12 @@ const createPOSCart = async (req, res) => {
   try {
     const { studentId, totalAmount, products } = req.body;
     const userData = await userModel.findById(req.user.id)
-    location_id=userData.location_id
-    if(!userData.location_id){
-      return res.status(404).send({success:false,message:"This user has no location"})
+    let location_id = userData.location_id
+    if (!userData.location_id) {
+      return res.status(404).send({ success: false, message: "This user has no location" })
     }
-    if(userData.location_id.purchaseStatus === "denied"){
-        return res.status(403).send({success:false,message:"Our application is undergoing maintenance. Please try again in a little while"})
+    if (userData.location_id.purchaseStatus === "denied") {
+      return res.status(403).send({ success: false, message: "Our application is undergoing maintenance. Please try again in a little while" })
     }
     //   const depositLim = await checkTransactionLimit(studentId,totalAmount,type="spend");
     //      if(!depositLim.status){
@@ -42,7 +42,7 @@ const createPOSCart = async (req, res) => {
     // Check inmate existence
     const existingStudent = await studentModel.findById(studentId)
     if (!existingStudent) {
-      return res.status(400).json({ success: false, message: "Inmate ID does not exist" });
+      return res.status(400).json({ success: false, message: "Student ID does not exist" });
     }
 
     // Check sufficient balance
@@ -73,7 +73,8 @@ const createPOSCart = async (req, res) => {
     }
 
     // Create POS cart
-    const newCart = new POSShoppingCart({ student_id:studentId, totalAmount, products });
+    location_id = req.user.role === 'SUPER ADMIN' ? req.body.location_id : req.user.location_id;
+    const newCart = new POSShoppingCart({ student_id: studentId, totalAmount, products, location_id });
     const savedCart = await newCart.save();
 
     // Deduct balance
@@ -88,20 +89,22 @@ const createPOSCart = async (req, res) => {
       action: 'CREATE',
       targetModel: 'POSShoppingCart',
       targetId: savedCart._id,
-      description: `Created POS cart for inmate ${studentId}`,
+      description: `Created POS cart for Student ${existingStudent.registration_number}`,
       changes: { totalAmount, products, studentId }
     });
 
     res.status(201).json({ success: true, data: savedCart, message: "Cart created successfully" });
 
   } catch (error) {
+    console.log("<><>error", error)
     res.status(500).json({ success: false, message: "Internal server error", error: error.message });
   }
 };
 
 const getAllPOSCarts = async (req, res) => {
   try {
-    const carts = await POSShoppingCart.find().populate("products.productId").populate("student_id").sort({ createdAt: -1 });
+    const locationFilter = req.user.role === 'SUPER ADMIN' ? {} : { location_id: req.user.location_id };
+    const carts = await POSShoppingCart.find(locationFilter).populate("products.productId").populate("student_id").sort({ createdAt: -1 });
 
     if (!carts || carts.length === 0) {
       return res.status(404).json({ success: false, message: "No carts found", data: [] });
@@ -157,7 +160,7 @@ const updatePOSCart = async (req, res) => {
       action: 'UPDATE',
       targetModel: 'POSShoppingCart',
       targetId: updatedCart._id,
-      description: `Updated POS cart for inmate ${updatedCart.inmateID}`,
+      description: `Updated POS cart for Student ${updatedCart.inmateID}`,
       changes: updateBody
     });
 
@@ -186,7 +189,7 @@ const deletePOSCart = async (req, res) => {
       action: 'DELETE',
       targetModel: 'POSShoppingCart',
       targetId: deletedCart._id,
-      description: `Deleted POS cart for inmate ${deletedCart.inmateID}`,
+      description: `Deleted POS cart for Student ${deletedCart.inmateID}`,
       changes: deletedCart
     });
     res.status(200).json({ success: true, message: "POS cart deleted successfully" });
@@ -198,7 +201,7 @@ const deletePOSCart = async (req, res) => {
 const reversePOSCart = async (req, res) => {
   try {
     const { id } = req.params;
-    if(req.user.role != "ADMIN") return res.status(404).send({success:false,message:"Only admins are allowed to use this feature"})
+    if (req.user.role != "ADMIN") return res.status(404).send({ success: false, message: "Only admins are allowed to use this feature" })
     const posCartData = await POSShoppingCart.findById(id);
     if (!posCartData) {
       return res.status(404).json({ success: false, message: "POS cart not found" });
@@ -208,7 +211,7 @@ const reversePOSCart = async (req, res) => {
       return res.status(400).json({ success: false, message: "This order is already reversed" });
     }
 
-    const studentData = await studentModel.findById( posCartData.student_id );
+    const studentData = await studentModel.findById(posCartData.student_id);
     if (!studentData) {
       return res.status(404).json({ success: false, message: "studentData not found" });
     }
@@ -227,15 +230,15 @@ const reversePOSCart = async (req, res) => {
     posCartData.is_reversed = true;
     await posCartData.save();
 
-   await logAudit({
+    await logAudit({
       userId: req.user.id,
       username: req.user.username,
       action: "DELETE",
       targetModel: "POSShoppingCart",
       targetId: posCartData._id,
-      description: `Reversed POS cart for inmate ${posCartData.student_id}`,
+      description: `Reversed POS cart for student ${studentData.registration_number}`,
       changes: {
-        ...posCartData.toObject() 
+        ...posCartData.toObject()
       }
     });
 
@@ -256,4 +259,4 @@ const reversePOSCart = async (req, res) => {
     });
   }
 };
-module.exports = { createPOSCart, getPOSCartById, getAllPOSCarts, updatePOSCart, deletePOSCart,reversePOSCart };
+module.exports = { createPOSCart, getPOSCartById, getAllPOSCarts, updatePOSCart, deletePOSCart, reversePOSCart };

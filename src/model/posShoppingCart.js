@@ -3,6 +3,7 @@ const mongoose = require("mongoose");
 const POSShoppingCartSchema = new mongoose.Schema(
   {
     student_id: { type: mongoose.Schema.Types.ObjectId, required: true, ref:"Student" },
+    location_id: { type: mongoose.Schema.Types.ObjectId, ref: 'StudentLocation'},
     totalAmount: { type: Number, default: 0 },
     is_reversed:{type:Boolean, default:false},
     products: [

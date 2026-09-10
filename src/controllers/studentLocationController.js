@@ -1,6 +1,7 @@
 const studentLocation = require("../model/studentLocationModel");
 const UserSchema = require("../model/userModel")
-const axios = require('axios');
+const AuditLog = require("../model/auditLogModel");
+const axios = require("../utils/globalServiceClient");
 const { syncToGlobal, syncUpdateToGlobal } = require("../service/syncGlobalLocationService");
 const userModel = require("../model/userModel");
 exports.AddLocation1 = async (req, res) => {
@@ -28,7 +29,7 @@ exports.AddLocation1 = async (req, res) => {
     // }
 
     const payload = { name: schoolName, baseUrl: baseUrl, location: locationName }
-    const globalLocationRes = await axios.post(`${process.env.GLOBAL_URL}/api/location`, payload);
+    const globalLocationRes = await axios.post(`/api/location`, payload);
     const location = new studentLocation({
       locationName: checkLocationName,
       createdBy: req.user.id,
@@ -44,6 +45,11 @@ exports.AddLocation1 = async (req, res) => {
       await UserSchema.findByIdAndUpdate(req.user.id, { location_id: result._id });
     }
 
+    await AuditLog.updateMany(
+      { userId: req.user.id, location_id: { $exists: false } },
+      { $set: { location_id: result._id } }
+    );
+
     return res.status(201).json({
       success: true,
       data: result,
@@ -57,18 +63,18 @@ exports.AddLocation1 = async (req, res) => {
 
 exports.AddLocation = async (req, res) => {
   try {
-    const { locationName, schoolName, baseUrl, schoolCode = "NOT_SET" } = req.body;
+    const { locationName, schoolName, schoolCode = "NOT_SET" } = req.body;
+    // Base URL is no longer configured per location; one common URL is shared.
+    const baseUrl = req.body.baseUrl || process.env.COMMON_BASE_URL || "";
 
-    if (!locationName || !schoolName || !baseUrl) {
+    if (!locationName || !schoolName) {
       return res.status(400).json({
         success: false,
-        message: "Required fields missing"
+        message: "locationName and schoolName are required"
       });
     }
-
     // 1️⃣ Check if local already exists (ONE location rule)
-    let location = await studentLocation.findOne();
-
+    let location = await studentLocation.findOne({user_id: req.user.id});
     if (!location) {
       // 2️⃣ Create locally (source of truth)
       location = await studentLocation.create({
@@ -76,6 +82,7 @@ exports.AddLocation = async (req, res) => {
         schoolName,
         baseUrl,
         schoolCode,
+        user_id: req.user.id,
         createdBy: req.user.id,
         updatedBy: req.user.id,
         syncStatus: "PENDING"
@@ -87,6 +94,11 @@ exports.AddLocation = async (req, res) => {
       req.user.id,
       { location_id: location._id },
       { new: true }
+    );
+
+    await AuditLog.updateMany(
+      { userId: req.user.id, location_id: { $exists: false } },
+      { $set: { location_id: location._id } }
     );
     // 3️⃣ ALWAYS attempt global sync (fire & forget)
    await syncToGlobal(location);
@@ -185,7 +197,7 @@ exports.updateLocation1 = async (req, res) => {
       baseUrl: baseUrl,
       location: locationName
     }
-    const globalLocationUpdateRes = await axios.put(`${process.env.GLOBAL_URL}/api/location/${existingLocation.global_location_id}`, payload);
+    const globalLocationUpdateRes = await axios.put(`/api/location/${existingLocation.global_location_id}`, payload);
     // --- 3. Prepare update data ---
     const updateData = { updatedBy: req.user.id };
     if (locationName) updateData.locationName = locationName.trim().toLowerCase();
@@ -250,6 +262,12 @@ exports.updateLocation = async (req, res) => {
       });
     }
 
+    // Defense in depth: a non-super-admin may only touch their own location.
+    const isSuperAdmin = String(req.user?.role || "").trim().toUpperCase().includes("SUPER");
+    if (!isSuperAdmin && String(req.user?.location_id || "") !== String(id)) {
+      return res.status(403).json({ success: false, message: "Unauthorized access" });
+    }
+
     // 2️⃣ Prepare local update
     const updateData = {
       updatedBy: req.user.id
@@ -271,7 +289,6 @@ exports.updateLocation = async (req, res) => {
       updateData,
       { new: true, runValidators: true }
     );
-console.log("<><>updatedLocation",updatedLocation)
      // 🔴 Ensure admin has location_id
     const locationupdate = await userModel.findByIdAndUpdate(
       req.user.id,
@@ -300,19 +317,44 @@ console.log("<><>updatedLocation",updatedLocation)
 
 exports.getAllLocation = async (req, res) => {
   try {
-    const response = await studentLocation.find().populate({ path: 'createdBy', select: 'fullname' }).populate({ path: 'updatedBy', select: 'fullname' })
-    if (!response.length) {
-      res.status(404).send({ success: false, data: response, message: "could not find location" })
+    let filter = {};
+
+    if (req.user.role !== "SUPER ADMIN") {
+      const orConditions = [
+        { user_id: req.user.id },
+      ];
+
+      if (req.user.location_id) {
+        orConditions.push({ _id: req.user.location_id });
+      }
+
+      filter = { $or: orConditions };
     }
-    res.status(200).send({ success: true, data: response, message: "location fetch successfully" })
+
+    const response = await studentLocation
+      .find(filter)
+      .populate({ path: 'createdBy', select: 'fullname' })
+      .populate({ path: 'updatedBy', select: 'fullname' });
+
+    if (!response.length) {
+      return res.status(404).send({ success: false, data: response, message: "could not find location" });
+    }
+
+    res.status(200).send({ success: true, data: response, message: "location fetch successfully" });
   } catch (error) {
-    res.status(500).send({ success: false, message: "internal server down" })
+    res.status(500).send({ success: false, message: "internal server down" });
   }
-}
+};
 
 exports.deleteLocation = async (req, res) => {
   try {
     const { id } = req.params;
+
+    // Defense in depth: a non-super-admin may only delete their own location.
+    const isSuperAdmin = String(req.user?.role || "").trim().toUpperCase().includes("SUPER");
+    if (!isSuperAdmin && String(req.user?.location_id || "") !== String(id)) {
+      return res.status(403).json({ success: false, message: "Unauthorized access" });
+    }
 
     const deletedLocation = await studentLocation.findByIdAndDelete(id);
 
@@ -337,7 +379,7 @@ exports.deleteLocation = async (req, res) => {
 
 exports.adminUpdateLocation = async (req, res) => {
   try {
-    const response = await axios.put(`${process.env.GLOBAL_URL}/api/location/${req.params.id}`, req.body)
+    const response = await axios.put(`/api/location/${req.params.id}`, req.body)
     if (response.data.status) {
       return res.status(200).send({ status: true, data: response.data.data, message: response.data.message })
     }

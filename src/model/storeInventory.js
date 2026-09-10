@@ -9,7 +9,8 @@ const storeInventorySchema = new mongoose.Schema({
   stock:         { type: Number, required: true },      // current store stock
   sellingPrice:  { type: Number, required: true },      // price to canteen
   category:      { type: String },                      // optional (Snacks, Soap…)
-  status:        { type: String, enum: ["Active", "Inactive"], default: "Active" }
+  status:        { type: String, enum: ["Active", "Inactive"], default: "Active" },
+  location_id: { type: mongoose.Schema.Types.ObjectId, ref: 'StudentLocation'}
 }, { timestamps: true });
 
 module.exports = mongoose.model("StoreInventory", storeInventorySchema);

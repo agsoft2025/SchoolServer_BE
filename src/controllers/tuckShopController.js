@@ -2,6 +2,7 @@ const TuckShopSchema = require("../model/tuckShopModel");
 const UserSchema = require("../model/userModel");
 const mongoose = require("mongoose");
 const logAudit = require("../utils/auditlogger");
+const { requireUserLocation } = require("../utils/locationGuard");
 
 const createTuckShop = async (req, res) => {
   const adminAccess = await UserSchema.findById(req.user.id);
@@ -10,7 +11,8 @@ const createTuckShop = async (req, res) => {
     }
   if (adminAccess.role === "ADMIN") {
     try {
-      const { itemName, description, price, stockQuantity,itemNo, category,status } = req.body;
+      let { itemName, description, price, stockQuantity,itemNo, category,status } = req.body;
+      const location_id = req.user.role === 'SUPER ADMIN' ? req.body.location_id : req.user.location_id;
       if((category === "recharge") && (price > 500)){
         return res.status(400).send({success:false,message: "Recharge failed: the amount must be ₹500 or less."})
       }
@@ -18,12 +20,12 @@ const createTuckShop = async (req, res) => {
       if (!itemName || price == null || stockQuantity == null || !itemNo || !category) {
         return res.status(400).json({ message: "Missing required fields" });
       }
-      const isItem = await TuckShopSchema.findOne({itemNo:itemNo})
+      const isItem = await TuckShopSchema.findOne({ itemNo: itemNo, location_id });
       if(isItem){
         return res.status(403).send({success:false,message:`item number ${itemNo} already existing`})
       }
 
-      const existingItem = await TuckShopSchema.findOne({ itemName, price,itemNo });
+      const existingItem = await TuckShopSchema.findOne({ itemName, price,itemNo, location_id });
 
       if (existingItem) {
         // Update existing item's stock
@@ -45,7 +47,7 @@ const createTuckShop = async (req, res) => {
         return res.status(200).json({ success: true, data: updatedItem, message: "Stock updated successfully" });
       }
 
-      const newItem = new TuckShopSchema({ itemName, description, price, stockQuantity, category,itemNo,status });
+      const newItem = new TuckShopSchema({ itemName, description, price, stockQuantity, category,itemNo,status, location_id });
       const savedItem = await newItem.save();
 
       await logAudit({
@@ -74,7 +76,15 @@ const createTuckShop = async (req, res) => {
 
 const getAllTucks = async (req, res) => {
   try {
-    const items = await TuckShopSchema.find().sort({ createdAt: -1 });
+    const filter = {};
+    if (req.user.role !== 'SUPER ADMIN') {
+      const locationId = requireUserLocation(req, res);
+      if (!locationId) return;
+      filter.location_id = locationId;
+    } else if (req.query.location_id) {
+      filter.location_id = req.query.location_id;
+    }
+    const items = await TuckShopSchema.find(filter).sort({ createdAt: -1 });
     if (!items) {
       return res.status(404).json({ success: false, message: "No data found" });
     }
@@ -191,10 +201,23 @@ const searchTuckItems = async (req, res) => {
 
     const regex = new RegExp(query, 'i');
 
+    const locationFilter = {};
+    if (req.user.role !== 'SUPER ADMIN') {
+      const locationId = requireUserLocation(req, res);
+      if (!locationId) return;
+      locationFilter.location_id = locationId;
+    } else if (req.query.location_id) {
+      locationFilter.location_id = req.query.location_id;
+    }
     const results = await TuckShopSchema.find({
-      $or: [
-        { itemName: regex },
-        { category: regex }
+      $and: [
+        locationFilter,
+        {
+          $or: [
+            { itemName: regex },
+            { category: regex }
+          ]
+        }
       ]
     }).sort({createdAt:-1})
 

@@ -16,7 +16,10 @@ const userSchema = new mongoose.Schema({
     otpExpiresAt: { type: Date },
     otpAttempts: { type: Number, default: 0 },
     otpAttemptedAt: { type: Date },
-    otpLockedUntil: { type: Date }
+    otpLockedUntil: { type: Date },
+    created_by: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    updated_by: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    isDeleted: { type: Boolean, default: false }
 },{timestamps: true});
 
 module.exports = mongoose.model('User',userSchema);

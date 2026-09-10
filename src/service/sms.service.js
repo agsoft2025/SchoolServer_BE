@@ -1,5 +1,26 @@
 const axios = require("axios");
-// whatsapp sms service (whatsapp cloud) 
+const { send: sendFast2Sms } = require("./sms/providers/fast2smsProvider");
+
+// Fast2SMS numbers param wants a bare 10-digit Indian mobile number, but contact_number
+// is stored/passed around with the 91 country code for WhatsApp's benefit -- strip it here.
+const toFast2SmsNumber = (phone = "") => {
+  const digits = String(phone).replace(/\D/g, "");
+  return digits.length === 12 && digits.startsWith("91") ? digits.slice(2) : digits;
+};
+
+// Login OTP via SMS (Fast2SMS DLT template), alongside sendWhatsAppOTP below.
+// Forces route: 'dlt' regardless of FAST2SMS_ROUTE so this isn't affected by however
+// the Bulk SMS Center (SMS_PROVIDER/FAST2SMS_ROUTE) happens to be configured.
+exports.sendSMS = (phone, otp, name) =>
+  sendFast2Sms({
+    to: toFast2SmsNumber(phone),
+    message: otp,
+    route: "dlt",
+    templateId: process.env.FAST2SMS_OTP_TEMPLATE_ID,
+    variables: [name, otp],
+  });
+
+// whatsapp sms service (whatsapp cloud)
 exports.sendWhatsAppOTP = async (phone, otp,name) => {
   try {
     const url = `https://graph.facebook.com/v22.0/${process.env.PHONE_NUMBER_ID}/messages`;
@@ -37,6 +58,7 @@ exports.sendWhatsAppOTP = async (phone, otp,name) => {
         "Content-Type": "application/json"
       }
     });
+    console.log("<><>whatsapp",res)
     return { success: true };
 
   } catch (error) {

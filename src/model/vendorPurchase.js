@@ -8,7 +8,8 @@ const vendorPurchaseSchema = new mongoose.Schema({
   gatePassNumber:{ type: String, required: true, trim: true},
   contact:    { phone: String, email: String, address: String }, 
   vendorValue:{type:Number,required:true},
-  status:     { type: String, enum: ["Active", "Inactive"], default: "Active" }
+  status:     { type: String, enum: ["Active", "Inactive"], default: "Active" },
+  location_id: { type: mongoose.Schema.Types.ObjectId, ref: 'StudentLocation'}
 }, { timestamps: true });
 
 module.exports = mongoose.model("VendorPurchase", vendorPurchaseSchema);

@@ -13,11 +13,10 @@ const mongoose = require('mongoose');
 
 const studentLocationSchema = new mongoose.Schema(
     {
-        singletonKey: {
-            type: String,
-            default: "SINGLE_LOCATION",
-            unique: true
-        },
+        // Optional: a location mirrored down from the Global panel has no local
+        // user yet (the Super Admin attaches an admin afterwards). Locally
+        // onboarded schools still always set this.
+        user_id: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
         locationName: String,
         schoolName: String,
         global_location_id: String,

@@ -13,38 +13,50 @@ const classModel = require('../model/classModel');
 
 exports.quickStatistics = async (req, res) => {
     try {
-        const tmpDate = new Date();
-        const y = tmpDate.getFullYear();
-        const m = tmpDate.getMonth();
-        const todayStart = new Date(y, m, 1);
-        todayStart.setHours(0, 0, 0, 0);
-        let monthluyDeposits = 0;
-        let monthlyWagesPaid = 0;
+        const now = new Date();
+        const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+        monthStart.setHours(0, 0, 0, 0);
+
+        const locationFilter = req.user.role === 'SUPER ADMIN' ? {} : { location_id: req.user.location_id };
+        const matchLocation = Object.keys(locationFilter || {}).length ? locationFilter : {};
 
         const totalBalanceAgg = await Inmate.aggregate([
-            { $group: { _id: null, totalBalance: { $sum: "$balance" } } }
+            { $match: matchLocation },
+            { $group: { _id: null, totalBalance: { $sum: { $ifNull: ["$deposite_amount", 0] } } } }
         ]);
         const totalSystemBalance = totalBalanceAgg[0]?.totalBalance || 0;
 
-        const todaysFinancialTransactions = await Financial.find({
-            createdAt: { $gte: todayStart }
+        const depositMatch = {
+            createdAt: { $gte: monthStart },
+            type: { $regex: /^deposit$/i },
+            ...matchLocation
+        };
+        const depositAgg = await Financial.aggregate([
+            { $match: depositMatch },
+            { $group: { _id: null, total: { $sum: { $ifNull: ["$depositAmount", 0] } } } }
+        ]);
+        const monthlyDeposits = depositAgg[0]?.total || 0;
+
+        const wagesMatch = {
+            createdAt: { $gte: monthStart },
+            type: { $regex: /^wages?$/i },
+            ...matchLocation
+        };
+        const wagesAgg = await Financial.aggregate([
+            { $match: wagesMatch },
+            { $group: { _id: null, total: { $sum: { $ifNull: ["$wageAmount", 0] } } } }
+        ]);
+        const monthlyWagesPaid = wagesAgg[0]?.total || 0;
+
+        res.status(200).json({
+            success: true,
+            data: { totalSystemBalance, monthlyDeposits, monthlyWagesPaid },
+            message: "Quick statistics fetched",
         });
-
-        todaysFinancialTransactions.forEach(finance => {
-            if (finance.type == 'wages') {
-                monthlyWagesPaid += finance.wageAmount
-            } else if (finance.type == 'deposit') {
-                monthluyDeposits += finance.depositAmount
-            }
-        });
-
-
-        res.status(200).json({ success: true, data: { totalSystemBalance, monthlyWagesPaid, monthluyDeposits }, message: "Inmate successfully fetched" });
-
     } catch (error) {
         return res.status(500).json({ message: "Internal server error", error: error.message });
     }
-}
+};
 
 exports.intimateBalanceReport1 = async (req, res) => {
     try {
@@ -86,11 +98,11 @@ exports.intimateBalanceReport1 = async (req, res) => {
         if (inmateId) {
             const inmate = await Inmate.findOne({ inmateId }).lean();
             if (!inmate) {
-                return res.status(404).json({ success: false, message: "Inmate not found" });
+                return res.status(404).json({ success: false, message: "Student not found" });
             }
 
-            inmate.financialHistory = await Financial.find({ inmateId }).lean();
-            inmate.shoppingHistory = await POSShoppingCart.find({ inmateId }).populate('products.productId').lean();
+            inmate.financialHistory = await Financial.find({ inmateId, ...locationFilter }).lean();
+            inmate.shoppingHistory = await POSShoppingCart.find({ inmateId, ...locationFilter }).populate('products.productId').lean();
 
             inmate.createdAt = moment(inmate.createdAt).format('DD-MM-YYYY hh:mm:ss A');
             inmate.admissionDate = moment(inmate.admissionDate).format('DD-MM-YYYY');
@@ -102,11 +114,11 @@ exports.intimateBalanceReport1 = async (req, res) => {
             inmates.push(inmate);
         } else {
             inmates = await Inmate.find({
-                createdAt: { $gte: fromDate, $lte: toDate }
+                createdAt: { $gte: fromDate, $lte: toDate }, ...locationFilter
             }).lean();
 
             if (!inmates.length) {
-                return res.status(404).json({ success: false, message: "No inmates found" });
+                return res.status(404).json({ success: false, message: "There is no record found to export" });
             }
         }
 
@@ -219,6 +231,7 @@ exports.intimateBalanceReport1 = async (req, res) => {
             ];
 
             const json2csvParser = new Parser({ fields });
+            if (csvData.length === 0) return res.status(404).json({ success: false, message: "There is no record found to export" });
             const csv = json2csvParser.parse(csvData);
 
             res.setHeader('Content-Disposition', 'attachment; filename=intimate_balance_report.csv');
@@ -269,15 +282,16 @@ exports.intimateBalanceReport = async (req, res) => {
         }
 
         let inmates = [];
+        const locationFilter = req.user.role === 'SUPER ADMIN' ? {} : { location_id: req.user.location_id };
 
         if (inmateId) {
-            const inmate = await Inmate.findOne({ inmateId }).lean();
+            const inmate = await Inmate.findOne({ inmateId, ...locationFilter }).lean();
             if (!inmate) {
                 return res.status(404).json({ success: false, message: "Inmate not found" });
             }
 
-            inmate.financialHistory = await Financial.find({ inmateId }).lean();
-            inmate.shoppingHistory = await POSShoppingCart.find({ inmateId }).populate('products.productId').lean();
+            inmate.financialHistory = await Financial.find({ inmateId, ...locationFilter }).lean();
+            inmate.shoppingHistory = await POSShoppingCart.find({ inmateId, ...locationFilter }).populate('products.productId').lean();
 
             inmate.createdAt = moment(inmate.createdAt).format('DD-MM-YYYY hh:mm:ss A');
             inmate.admissionDate = moment(inmate.admissionDate).format('DD-MM-YYYY');
@@ -289,15 +303,15 @@ exports.intimateBalanceReport = async (req, res) => {
             inmates.push(inmate);
         } else {
             inmates = await Inmate.find({
-                createdAt: { $gte: fromDate, $lte: toDate }
+                createdAt: { $gte: fromDate, $lte: toDate }, ...locationFilter
             }).lean();
             if (!inmates.length) {
-                return res.status(404).json({ success: false, message: "No inmates found" });
+                return res.status(404).json({ success: false, message: "There is no record found to export" });
             }
 
             for (let inmate of inmates) {
-                inmate.financialHistory = await Financial.find({ inmateId: inmate.inmateId }).lean();
-                inmate.shoppingHistory = await POSShoppingCart.find({ inmateId: inmate.inmateId })
+                inmate.financialHistory = await Financial.find({ inmateId: inmate.inmateId, ...locationFilter }).lean();
+                inmate.shoppingHistory = await POSShoppingCart.find({ inmateId: inmate.inmateId, ...locationFilter })
                     .populate('products.productId')
                     .lean();
                 inmate.createdAt = moment(inmate.createdAt).format('DD-MM-YYYY hh:mm:ss A');
@@ -418,6 +432,7 @@ exports.intimateBalanceReport = async (req, res) => {
             ];
 
             const json2csvParser = new Parser({ fields });
+            if (csvData.length === 0) return res.status(404).json({ success: false, message: "There is no record found to export" });
             const csv = json2csvParser.parse(csvData);
 
             res.setHeader('Content-Disposition', 'attachment; filename=intimate_balance_report.csv');
@@ -462,12 +477,13 @@ exports.transactionSummaryReport = async (req, res) => {
         }
 
         // Fetch data
+        const locationFilter = req.user.role === 'SUPER ADMIN' ? {} : { location_id: req.user.location_id };
         const [posTransactions, financialTransactions] = await Promise.all([
-            POSShoppingCart.find({ createdAt: { $gte: startDate } })
+            POSShoppingCart.find({ createdAt: { $gte: startDate }, ...locationFilter })
                 .populate("products.productId")
                 .populate("student_id")
                 .lean(),
-            Financial.find({ createdAt: { $gte: startDate } })
+            Financial.find({ createdAt: { $gte: startDate }, ...locationFilter })
                 .populate("student_id")
                 .lean()
         ]);
@@ -478,7 +494,7 @@ exports.transactionSummaryReport = async (req, res) => {
             ...posTransactions
                 .filter(tx => board_name === "all" || tx.student_id?.board_name === board_name)
                 .map(tx => ({
-                    registration_number: tx.student_id?.registration_number,
+                    Roll_no: tx.student_id?.registration_number,
                     board_name: tx.student_id?.board_name,
                     transaction: "POS Purchase",
                     source: "POS",
@@ -502,9 +518,14 @@ exports.transactionSummaryReport = async (req, res) => {
 
         // Sort transactions by newest first
         allTransactions.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+        if (allTransactions.length === 0) {
+            return res.status(404).json({ success: false, message: "There is no record found to export" });
+        }
+
         // CSV Export
         if (format === "csv") {
-            const fields = ["Roll_no", "board_name", "transaction", "source", "amount", "type", "createdAt"];
+            const fields = ["Roll_no", "board_name", "transaction", "source", "amount", "type"];
             const parser = new Parser({ fields });
             const csv = parser.parse(allTransactions);
 
@@ -564,9 +585,13 @@ exports.tuckShopSalesReport = async (req, res) => {
             toDate.setHours(23, 59, 59, 999);
         }
 
-        const transactions = await POSShoppingCart.find({
-            createdAt: { $gte: fromDate, $lte: toDate }
-        })
+        const locationFilter = req.user.role === 'SUPER ADMIN' ? {} : { location_id: req.user.location_id };
+        const baseQuery = {
+            createdAt: { $gte: fromDate, $lte: toDate },
+            is_reversed: false,
+            ...locationFilter
+        };
+        const transactions = await POSShoppingCart.find(baseQuery)
             .populate('products.productId', 'itemName price category')
             .populate('student_id', 'registration_number student_name board_name')
             .lean();
@@ -579,7 +604,7 @@ exports.tuckShopSalesReport = async (req, res) => {
         if (!filteredTransactions.length) {
             return res.status(404).json({
                 success: false,
-                message: "No transaction data found"
+                message: "There is no record found to export"
             });
         }
 
@@ -618,8 +643,7 @@ exports.tuckShopSalesReport = async (req, res) => {
                 'category',
                 'quantity',
                 'price',
-                'totalAmount',
-                'createdAt'
+                'totalAmount'
             ];
 
             const parser = new Parser({ fields });
@@ -675,10 +699,11 @@ exports.wageDistributionReport = async (req, res) => {
             return res.status(400).json({ message: "Please provide either dateRange or startDate & endDate" });
         }
 
-        // --- Query wage transactions ---
+        const locationFilter = req.user.role === 'SUPER ADMIN' ? {} : { location_id: req.user.location_id };
         const query = {
             createdAt: { $gte: fromDate, $lte: toDate },
             type: 'wages',
+            ...locationFilter
         };
 
         if (department !== "all") {
@@ -692,7 +717,7 @@ exports.wageDistributionReport = async (req, res) => {
         });
 
         if (!items || items.length === 0) {
-            return res.status(404).json({ success: false, message: "No wage data found in selected range" });
+            return res.status(404).json({ success: false, message: "There is no record found to export" });
         }
 
         // --- Audit Log ---
@@ -716,7 +741,6 @@ exports.wageDistributionReport = async (req, res) => {
                 { label: 'Department', value: 'department' },
                 { label: 'Worked Hours', value: 'hoursWorked' },
                 { label: 'Wage Amount', value: 'wageAmount' },
-                { label: 'Transaction Time', value: 'createdAt' },
                 { label: 'Status', value: 'status' },
             ];
 
@@ -776,17 +800,18 @@ exports.inventoryStockHistoryReport1 = async (req, res) => {
             toDate.setHours(23, 59, 59, 999);
         }
 
-        // --- Fetch inventory data (you can add your own filters inside getVendorPurchaseSummary) ---
+        const locationFilter = req.user.role === 'SUPER ADMIN' ? {} : { location_id: req.user.location_id };
         const inventoryData = await getVendorPurchaseSummary({
             ...req.query,
             fromDate,
-            toDate
+            toDate,
+            ...locationFilter
         });
 
         if (!inventoryData || inventoryData.length === 0) {
             return res.status(404).json({
                 success: false,
-                message: 'No inventory stock history found in selected range'
+                message: 'There is no record found to export'
             });
         }
         // Format each record (example fields—adjust to match your schema)
@@ -824,8 +849,7 @@ exports.inventoryStockHistoryReport1 = async (req, res) => {
                 'stockQuantity',
                 'price',
                 'totalQty',
-                'status',
-                'updatedAt'
+                'status'
             ];
             const parser = new Parser({ fields });
             const csv = parser.parse(formatted);
@@ -871,6 +895,9 @@ exports.inventoryStockHistoryReport = async (req, res) => {
 
         // --- Build filter ---
         const filter = {};
+        if (req.user.role !== 'SUPER ADMIN') {
+            filter.location_id = req.user.location_id;
+        }
         if (itemName) filter.itemName = { $regex: itemName, $options: "i" };
         if (category) filter.category = { $regex: `^${category}$`, $options: "i" };
         if (status) filter.status = status;
@@ -924,10 +951,9 @@ exports.inventoryStockHistoryReport = async (req, res) => {
             paginated = true;
         }
 
-        // --- Fetch items ---
         const items = await query.exec();
         if (!items.length) {
-            return res.status(200).json({ success: true, message: "No data found", data: [] });
+            return res.status(404).json({ success: false, message: "There is no record found to export", data: [] });
         }
 
         // --- Compute totalQty from storeItemModel ---
@@ -958,9 +984,7 @@ exports.inventoryStockHistoryReport = async (req, res) => {
                 'totalQty',
                 'category',
                 'itemNo',
-                'status',
-                'createdAt',
-                'updatedAt'
+                'status'
             ];
             const parser = new Parser({ fields });
             const csv = parser.parse(withTotalQty);
@@ -1016,10 +1040,14 @@ exports.studentReport = async (req, res) => {
 
         // --- Build filter ---
         const filter = {};
+        if (req.user.role !== 'SUPER ADMIN') {
+            filter.location_id = req.user.location_id;
+        } else if (location_id) {
+            filter.location_id = location_id;
+        }
         if (student_name) filter.student_name = { $regex: student_name, $options: 'i' };
         if (registration_number) filter.registration_number = { $regex: registration_number, $options: 'i' };
         if (gender) filter.gender = gender;
-        if (location_id) filter.location_id = location_id;
         if (board_name && board_name !== "all") {
             filter.board_name = { $regex: board_name, $options: "i" };
         }
@@ -1052,10 +1080,9 @@ exports.studentReport = async (req, res) => {
             paginated = true;
         }
 
-        // --- Fetch students ---
         const students = await studentQuery.lean();
         if (!students.length) {
-            return res.status(200).json({ success: true, message: 'No students found', data: [] });
+            return res.status(404).json({ success: false, message: 'There is no record found to export', data: [] });
         }
 
         // --- Format date fields ---
@@ -1093,13 +1120,9 @@ exports.studentReport = async (req, res) => {
                 'class_name',
                 'section',
                 'academic_year',
-                'date_of_birth',
                 'hostel_name',
                 'board_name',
-                'contact_number',
-                'profile_picture',
-                'createdAt',
-                'updatedAt'
+                'contact_number'
             ];
 
             const parser = new Parser({ fields });

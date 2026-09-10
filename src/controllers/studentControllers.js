@@ -19,10 +19,11 @@ const studentLocation = require("../model/studentLocationModel");
 const fileUploadModel = require("../model/fileUploadModel");
 const downloadInmatesCSV1 = async (req, res) => {
   try {
-    const inmates = await Inmate.find().lean();
+    const locationFilter = req.user.role === 'SUPER ADMIN' ? {} : { location_id: req.user.location_id };
+    const inmates = await Inmate.find(locationFilter).lean();
 
     if (!inmates || inmates.length === 0) {
-      return res.status(404).json({ message: 'No inmates found to export' });
+      return res.status(404).json({ success: false, message: 'There is no record found to export' });
     }
 
     const fields = [
@@ -60,10 +61,11 @@ const downloadInmatesCSV1 = async (req, res) => {
 
 const downloadInmatesCSV = async (req, res) => {
   try {
-    const inmates = await Inmate.find().lean();
+    const locationFilter = req.user.role === 'SUPER ADMIN' ? {} : { location_id: req.user.location_id };
+    const inmates = await Inmate.find(locationFilter).lean();
 
     if (!inmates || inmates.length === 0) {
-      return res.status(404).json({ message: 'No inmates found to export' });
+      return res.status(404).json({ success: false, message: 'There is no record found to export' });
     }
 
     const fields = [
@@ -104,13 +106,14 @@ const downloadInmatesCSV = async (req, res) => {
 
 const downloadStudentsCSV = async (req, res) => {
   try {
+    const locationFilter = req.user.role === 'SUPER ADMIN' ? { isDeleted: { $ne: true } } : { location_id: req.user.location_id, isDeleted: { $ne: true } };
     // Populate class_info to get class_name, section, academic_year
-    const students = await studentModel.find()
+    const students = await studentModel.find(locationFilter)
       .populate('class_info')  // populate class info
       .lean();
 
     if (!students || students.length === 0) {
-      return res.status(404).json({ message: 'No students found to export' });
+      return res.status(404).json({ success: false, message: 'There is no record found to export' });
     }
 
     const fields = [
@@ -134,8 +137,8 @@ const downloadStudentsCSV = async (req, res) => {
       student_name: student.student_name,
       father_name: student.father_name,
       mother_name: student.mother_name,
-      board_name:student.board_name,
-      hostel_name:student.hostel_name,
+      board_name: student.board_name,
+      hostel_name: student.hostel_name,
       gender: student.gender,
       deposite_amount: student.deposite_amount,
       class_name: student.class_info?.class_name || '',
@@ -167,12 +170,16 @@ const createStudent = async (req, res) => {
   let savedUser = null;
 
   try {
-    const {
+    let {
       registration_number, student_name, father_name, mother_name,
       date_of_birth, gender, birth_place, nationality, mother_tongue,
       blood_group, religion, deposite_amount, class_info, location_id,
-      pro_pic, contact_number, descriptor, hostel_name,board_name
+      pro_pic, contact_number, descriptor, hostel_name, board_name
     } = req.body;
+
+    if (req.user.role !== 'SUPER ADMIN') {
+      location_id = req.user.location_id;
+    }
     const missingFields = [];
     if (!registration_number) missingFields.push("registration_number");
     // if (!deposite_amount && deposite_amount !== 0) missingFields.push("deposite_amount");
@@ -185,7 +192,13 @@ const createStudent = async (req, res) => {
     // if (!date_of_birth) missingFields.push("date_of_birth");
     // if (!gender) missingFields.push("gender");
     // if (!class_info) missingFields.push("class_info");
-    if (!location_id) missingFields.push("location_id");
+    if (!location_id) {
+      return res.status(400).json({
+        success: false,
+        message: "Please add location"
+      });
+
+    }
 
     if (missingFields.length > 0) {
       return res.status(400).json({
@@ -198,11 +211,16 @@ const createStudent = async (req, res) => {
     if (!validGenders.includes(gender)) {
       return res.status(400).json({ success: false, message: "Invalid gender value." });
     }
-    
+
 
     // 2️⃣ Check duplicate student
-    const existingStudent = await studentModel.findOne({ registration_number });
-    if (existingStudent) return res.status(400).json({ success: false, message: "Registration number already exists." });
+    const existingStudent = await studentModel.findOne({ registration_number, location_id });
+    if (existingStudent) return res.status(400).json({ success: false, message: "Registration number already exists in this location." });
+
+    if (contact_number) {
+      const existingContact = await studentModel.findOne({ contact_number, location_id });
+      if (existingContact) return res.status(400).json({ success: false, message: "Mobile number already exists in this location." });
+    }
 
     // 3️⃣ Check descriptor in users
     if (descriptor) {
@@ -233,7 +251,9 @@ const createStudent = async (req, res) => {
       password: hashedPassword,
       role: 'STUDENT',
       location_id,
-      descriptor: descriptor || null
+      descriptor: descriptor || null,
+      created_by: req.user.id,
+      updated_by: req.user.id
     });
 
     // 7️⃣ Create student with user_id
@@ -256,7 +276,9 @@ const createStudent = async (req, res) => {
       contact_number,
       pro_pic: pro_pic || null,
       user_id: savedUser._id,
-      board_name
+      board_name,
+      created_by: req.user.id,
+      updated_by: req.user.id
     });
 
     // 8️⃣ Log audit
@@ -307,7 +329,13 @@ const getStudents = async (req, res) => {
     const order = sortOrder === 'asc' ? 1 : -1;
 
     // 🧭 Build search/filter object
-    const searchFilter = {};
+    const searchFilter = { isDeleted: { $ne: true } };
+
+    if (req.user.role !== 'SUPER ADMIN') {
+      searchFilter.location_id = req.user.location_id;
+    } else if (location_id) {
+      searchFilter.location_id = location_id;
+    }
 
     if (student_name) {
       searchFilter.student_name = { $regex: student_name, $options: 'i' }; // partial match
@@ -325,10 +353,6 @@ const getStudents = async (req, res) => {
 
     if (gender) {
       searchFilter.gender = gender;
-    }
-
-    if (location_id) {
-      searchFilter.location_id = location_id;
     }
     if (search) {
       searchFilter.$or = [
@@ -430,7 +454,7 @@ const updateStudent = async (req, res) => {
   let uploadedProfilePic = null; // For rollback if needed
 
   try {
-    const {
+    let {
       registration_number,
       student_name,
       father_name,
@@ -452,6 +476,10 @@ const updateStudent = async (req, res) => {
       board_name
     } = req.body;
 
+    if (req.user.role !== 'SUPER ADMIN') {
+      location_id = req.user.location_id;
+    }
+
     // 1️⃣ Check if student exists
     const student = await studentModel.findById(id);
     if (!student) {
@@ -468,11 +496,19 @@ const updateStudent = async (req, res) => {
       return res.status(400).json({ success: false, message: "Invalid gender value." });
     }
 
-    // 3️⃣ Check registration_number uniqueness if changed
+    // 3️⃣ Check registration_number and contact_number uniqueness
+    const targetLocationId = location_id || student.location_id;
     if (registration_number && registration_number !== student.registration_number) {
-      const regExist = await studentModel.findOne({ registration_number, _id: { $ne: id } });
+      const regExist = await studentModel.findOne({ registration_number, location_id: targetLocationId, _id: { $ne: id } });
       if (regExist) {
-        return res.status(400).json({ success: false, message: "Registration number already exists." });
+        return res.status(400).json({ success: false, message: "Registration number already exists in this location." });
+      }
+    }
+
+    if (contact_number && contact_number !== student.contact_number) {
+      const contactExist = await studentModel.findOne({ contact_number, location_id: targetLocationId, _id: { $ne: id } });
+      if (contactExist) {
+        return res.status(400).json({ success: false, message: "Mobile number already exists in this location." });
       }
     }
 
@@ -632,28 +668,27 @@ const deleteStudent = async (req, res) => {
       return res.status(404).json({ success: false, message: "Student not found" });
     }
 
-    // 2️⃣ Find user
-    userData = await userModel.findById(studentData.user_id);
-
-    // 3️⃣ Delete profile picture if exists
-    if (studentData.pro_pic) {
-      profilePicData = await fileUploadModel.findById(studentData.pro_pic);
-      if (profilePicData) {
-        const filePath = path.join(__dirname, '..', profilePicData.file_url);
-        if (fs.existsSync(filePath)) {
-          fs.unlinkSync(filePath); // Delete physical file
-        }
-        await fileUploadModel.findByIdAndDelete(profilePicData._id); // Delete DB record
-      }
+    // 2️⃣ Find user by user_id OR username
+    if (studentData.user_id) {
+      userData = await userModel.findById(studentData.user_id);
+    }
+    if (!userData && studentData.registration_number) {
+      userData = await userModel.findOne({ username: studentData.registration_number });
     }
 
-    // 4️⃣ Delete student record
-    await studentModel.findByIdAndDelete(id);
+    // 3️⃣ Soft delete student record
+    await studentModel.findByIdAndUpdate(id, { isDeleted: true });
 
-    // 5️⃣ Delete user account
-    if (userData) {
-      await userModel.findByIdAndDelete(userData._id);
-    }
+    // 4️⃣ Soft delete user account(s) using robust matching
+    await userModel.updateMany(
+      {
+        $or: [
+          ...(studentData.user_id ? [{ _id: studentData.user_id }] : []),
+          { username: studentData.registration_number }
+        ]
+      },
+      { isDeleted: true }
+    );
 
     // 6️⃣ Log audit
     await logAudit({
@@ -694,7 +729,7 @@ const getStudentById = async (req, res) => {
     }
 
     // 🔎 Find the student and populate related fields
-    const student = await studentModel.findById(id)
+    const student = await studentModel.findOne({ _id: id, isDeleted: { $ne: true } })
       .populate('location_id', 'locationName')
       .populate('class_info', 'class_name section academic_year')
       .populate('pro_pic', 'file_name file_url uploaded_by');
@@ -728,7 +763,7 @@ const getStudentByIdProfile = async (req, res) => {
     }
 
     // 🔎 Find the student and populate related fields
-    const student = await studentModel.findById(id)
+    const student = await studentModel.findOne({ _id: id, isDeleted: { $ne: true } })
       .populate('location_id', 'locationName')
       .populate('class_info', 'class_name section academic_year')
       .populate('pro_pic', 'file_name file_url uploaded_by');
@@ -762,7 +797,7 @@ const getStudentByData = async (req, res) => {
     }
 
     // 🔎 Find the student and populate related fields
-    const student = await studentModel.findOne({ registration_number: req.params.regNo })
+    const student = await studentModel.findOne({ registration_number: req.params.regNo, isDeleted: { $ne: true } })
       .populate('location_id', 'locationName')
       .populate('class_info', 'class_name section academic_year')
       .populate('pro_pic', 'file_name file_url uploaded_by');
@@ -796,22 +831,22 @@ const deleteInmate = async (req, res) => {
     if (!mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({ message: "Invalid ID format" });
     }
-    const updatedInmate = await InmateSchema.findByIdAndDelete(id);
+    const updatedInmate = await InmateSchema.findByIdAndUpdate(id, { isDeleted: true }, { new: true });
     if (!updatedInmate) {
       return res.status(404).json({ message: "No data found" });
     }
-    const inmateDelete = await userModel.deleteOne({ inmateId: updatedInmate.inmateId })
+    const inmateDelete = await userModel.updateOne({ inmateId: updatedInmate.inmateId }, { isDeleted: true });
 
     await logAudit({
       userId: req.user.id,
       username: req.user.username,
       action: 'DELETE',
-      targetModel: 'Inmate',
+      targetModel: 'Student',
       targetId: updatedInmate._id,
-      description: `Deleted inmate ${updatedInmate.inmateId}`,
+      description: `Deleted Student ${updatedInmate.inmateId}`,
       changes: updatedInmate.toObject()
     });
-    res.status(200).json({ success: true, message: "Inmate successfully deleted" })
+    res.status(200).json({ success: true, message: "Student successfully deleted" })
   } catch (error) {
     res.status(500).json({ success: false, message: "Internal server error", error: error.message });
   }
@@ -863,7 +898,7 @@ const getInmateUsingInmateID = async (req, res) => {
     if (!findInmate) {
       return res.status(404).json({ message: "No data found" });
     }
-    res.status(200).json({ success: true, data: findInmate, message: "Inmate successfully fetched" })
+    res.status(200).json({ success: true, data: findInmate, message: "Student successfully fetched" })
   } catch (error) {
     res.status(500).json({ success: false, message: "Internal server error", error: error.message });
   }
@@ -951,7 +986,7 @@ const getInmateTransactionData = async (req, res) => {
       limit: pageSize,
       totalPages: Math.ceil(allTransactions.length / pageSize),
       transactions: paginated,
-      message: "Fetched inmate transactions",
+      message: "Fetched student transactions",
     });
 
 
@@ -1162,4 +1197,4 @@ const fetchInmateDataUsingFace = async (req, res) => {
     return res.status(500).send({ success: false, message: "internal server down", error: error.message })
   }
 }
-module.exports = { createStudent, getStudents, deleteStudent, getStudentById, downloadStudentsCSV, updateStudent, deleteInmate, searchInmates, downloadInmatesCSV, getInmateUsingInmateID, getInmateTransactionData, fetchInmateDataUsingFace, getStudentByData, getStudentTransactionData,getStudentByIdProfile };
+module.exports = { createStudent, getStudents, deleteStudent, getStudentById, downloadStudentsCSV, updateStudent, deleteInmate, searchInmates, downloadInmatesCSV, getInmateUsingInmateID, getInmateTransactionData, fetchInmateDataUsingFace, getStudentByData, getStudentTransactionData, getStudentByIdProfile };

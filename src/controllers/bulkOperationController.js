@@ -30,6 +30,9 @@ const convertExcelDate = (excelDate) => {
 const bulkUpsertInmates = async (req, res) => {
   try {
     await InmateLocation.findByIdAndUpdate(req.body.location, { $set: { purchaseStatus: "denied" } }).then(async (_d) => {
+      if (req.user.role !== 'SUPER ADMIN' && req.body.location !== req.user.location_id?.toString()) {
+        return res.status(403).json({ message: 'Unauthorized to upsert inmates for this location' });
+      }
       if (!req.file) {
         return res.status(400).json({ message: 'No file uploaded' });
       }
@@ -146,7 +149,7 @@ const bulkUpsertInmates = async (req, res) => {
           results.created.push(inmateId);
           if (savedInmate) {
             const hashedPassword = await bcrypt.hash(inmateId, 10);
-            const newUser = new userModel({ username: inmateId, fullname: inmateId, inmateId, password: hashedPassword, role: "INMATE", location_id });
+            const newUser = new userModel({ username: inmateId, fullname: inmateId, inmateId, password: hashedPassword, role: "Student", location_id });
             await newUser.save().then((data) => {
 
             }).catch((error) => {
@@ -162,15 +165,15 @@ const bulkUpsertInmates = async (req, res) => {
         userId: req.user.id,
         username: req.user.username,
         action: 'BULK_UPSERT',
-        targetModel: 'Inmate',
+        targetModel: 'Student',
         targetId: null,
-        description: `Bulk upsert of inmates performed. Created: ${results.created.length}, Updated: ${results.updated.length}, Failed: ${results.failed.length}`,
+        description: `Bulk upsert of students performed. Created: ${results.created.length}, Updated: ${results.updated.length}, Failed: ${results.failed.length}`,
         changes: results
       });
 
       return res.status(200).json({
         success: true,
-        message: 'Bulk inmate operation completed',
+        message: 'Bulk student operation completed',
         results
       });
 
@@ -200,6 +203,9 @@ const bulkUpsertStudents = async (req, res) => {
     if (!location_id) {
       return res.status(400).json({ success: false, message: "location_id required" });
     }
+    if (req.user.role !== 'SUPER ADMIN' && location_id !== req.user.location_id?.toString()) {
+      return res.status(403).json({ success: false, message: "Unauthorized location bulk upload" });
+    }
 
     const ext = req.file.originalname.split('.').pop().toLowerCase();
     let students = [];
@@ -223,7 +229,7 @@ const bulkUpsertStudents = async (req, res) => {
 
     for (const student of students) {
       const {
-        Roll_no:registration_number,
+        Roll_no: registration_number,
         student_name,
         father_name,
         mother_name,
@@ -279,10 +285,19 @@ const bulkUpsertStudents = async (req, res) => {
       }
 
       // Check existing student
-      const existingStudent = await studentModel.findOne({ registration_number });
+      const existingStudent = await studentModel.findOne({ registration_number, location_id });
       if (existingStudent) {
-        results.skipped.push({ registration_number, reason: "Duplicate registration_number — student already exists" });
+        results.skipped.push({ registration_number, reason: "Duplicate registration_number — student already exists in this location" });
         continue;
+      }
+
+      // Check existing contact number
+      if (contact_number) {
+        const existingContact = await studentModel.findOne({ contact_number, location_id });
+        if (existingContact) {
+          results.skipped.push({ registration_number, reason: `Duplicate contact_number — mobile number ${contact_number} already exists in this location` });
+          continue;
+        }
       }
 
       // Create/find class
@@ -323,12 +338,14 @@ const bulkUpsertStudents = async (req, res) => {
           gender,
           hostel_name,
           board_name,
-          deposite_amount:0,
+          deposite_amount: 0,
           class_info: classData._id,
           location_id,
           contact_number,
           pro_pic: pro_pic || null,
-          user_id: savedUser._id
+          user_id: savedUser._id,
+          created_by: req.user.id,
+          updated_by: req.user.id
         });
 
         results.created.push({ registration_number, student_id: savedStudent._id });
@@ -377,6 +394,9 @@ const bulkUpsertStudents = async (req, res) => {
 const bulkUpsertFinancial = async (req, res) => {
   try {
     await InmateLocation.findByIdAndUpdate(req.body.location, { $set: { purchaseStatus: "denied" } }).then(async (_d) => {
+      if (req.user.role !== 'SUPER ADMIN' && req.body.location !== req.user.location_id?.toString()) {
+        return res.status(403).json({ message: 'Unauthorized to upsert financial records for this location' });
+      }
       if (!req.file) {
         return res.status(400).json({ message: 'No file uploaded' });
       }
@@ -464,7 +484,7 @@ const bulkUpsertFinancial = async (req, res) => {
                 inmate.custodyType = custodyType;
                 await inmate.save();
               } else {
-                results.failed.push({ inmateId, reason: 'Inmate not found for balance update' });
+                results.failed.push({ inmateId, reason: 'Student not found for balance update' });
                 continue;
               }
             }

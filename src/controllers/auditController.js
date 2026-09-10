@@ -1,8 +1,9 @@
 const AuditLog = require('../model/auditLogModel');
+const { requireUserLocation } = require('../utils/locationGuard');
 
 const getAuditLogs = async (req, res) => {
   try {
-    const { userId, action, fromDate, toDate, page = 1, limit = 20 } = req.query;
+    const { userId, action, fromDate, toDate, page = 1, limit = 20, location_id } = req.query;
 
     const filter = {};
 
@@ -20,6 +21,14 @@ const getAuditLogs = async (req, res) => {
       if (toDate) filter.createdAt.$lte = new Date(toDate);
     }
 
+    if (req.user.role !== 'SUPER ADMIN') {
+      const locationId = requireUserLocation(req, res);
+      if (!locationId) return;
+      filter.location_id = locationId;
+    } else if (location_id) {
+      filter.location_id = location_id;
+    }
+
     const pageNumber = parseInt(page, 10);
     const pageSize = parseInt(limit, 10);
     const skip = (pageNumber - 1) * pageSize;
@@ -28,19 +37,24 @@ const getAuditLogs = async (req, res) => {
 
     const logs = await AuditLog.find(filter)
       .populate('userId', 'username fullName')
+      .populate('location_id', 'locationName schoolName')
       .sort({ createdAt: -1 })
       .skip(skip)
-      .limit(pageSize);
+      .limit(pageSize)
+      .lean();
+
+    const sanitizedLogs = logs; // Keeping changes for frontend
 
     res.status(200).json({
       success: true,
-      data: logs,
+      data: sanitizedLogs,
       pagination: {
         total: totalLogs,
         page: pageNumber,
         limit: pageSize,
         totalPages: Math.ceil(totalLogs / pageSize)
-      }
+      },
+      message: 'Audit logs fetched successfully'
     });
   } catch (error) {
     res.status(500).json({

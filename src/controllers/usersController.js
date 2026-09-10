@@ -3,6 +3,8 @@ const bcrypt = require('bcrypt');
 const mongoose = require("mongoose");
 const logAudit = require("../utils/auditlogger");
 const userModel = require("../model/userModel");
+const studentLocationModel = require("../model/studentLocationModel");
+const escapeRegex = require("../utils/escapeRegex");
 const faceapi = require('face-api.js');
 const inmateModel = require("../model/studentModel");
 const { faceRecognitionService, faceRecognitionExcludeUserService } = require("../service/faceRecognitionService");
@@ -10,7 +12,7 @@ const { findByIdAndUpdate } = require("../model/departmentModel");
 
 const defaultUser = async (req, res) => {
     try {
-        const users = await UserSchema.find({username:'Admin'});
+        const users = await UserSchema.find({ username: 'Admin' });
         if (users.length === 0) {
             const hashedPassword = await bcrypt.hash("admin@123", 10);
 
@@ -33,17 +35,18 @@ const defaultUser = async (req, res) => {
 
 const createUser = async (req, res) => {
     try {
-        const { username, fullname, role, password, locationId, descriptor } = req.body;
+        let { username, fullname, role, password, locationId, descriptor } = req.body;
+        if (req.user.role !== 'SUPER ADMIN') locationId = req.user.location_id;
         if (!locationId) {
-            return res.status(400).json({ message: "location is required" });
+            return res.status(400).json({ message: "Please add location" });
         }
 
         if (descriptor) {
-              const checkFaceMatch = await faceRecognitionService(descriptor)
-              if (checkFaceMatch.status) {
+            const checkFaceMatch = await faceRecognitionService(descriptor)
+            if (checkFaceMatch.status) {
                 return res.status(400).send({ success: false, message: `A face record already exists for user ${checkFaceMatch.username}` })
-              }
             }
+        }
 
         if (!username || !fullname || !role || !password) {
             return res.status(400).json({ message: "All fields are required" });
@@ -55,7 +58,15 @@ const createUser = async (req, res) => {
         }
         const hashedPassword = await bcrypt.hash(password, 10);
 
-        const newUser = new UserSchema({ username, fullname, password: hashedPassword, role, location_id: locationId, descriptor });
+        const newUser = new UserSchema({
+            username,
+            fullname,
+            password: hashedPassword,
+            role,
+            location_id: locationId,
+            descriptor,
+            created_by: req.user.id
+        });
         const savedUser = await newUser.save();
 
         await logAudit({
@@ -78,6 +89,57 @@ const createUser = async (req, res) => {
     }
 };
 
+const superAdminCreate = async (req, res) => {
+    try {
+        const { username, fullname, password, location_id } = req.body
+
+        if (!username || !fullname || !password) {
+            return res.status(400).send({ status: false, message: "username, fullname and password are required" });
+        }
+        if (!location_id) {
+            return res.status(400).send({ status: false, message: "location_id is required to assign this admin to a school" });
+        }
+        if (!mongoose.Types.ObjectId.isValid(location_id)) {
+            return res.status(400).send({ status: false, message: "Invalid location_id" });
+        }
+        const locationExists = await studentLocationModel.findById(location_id);
+        if (!locationExists) {
+            return res.status(404).send({ status: false, message: "Location not found" });
+        }
+
+        const usernameExist = await userModel.findOne({username:{$regex:`^${escapeRegex(username)}$`,$options:"i"}})
+        if(usernameExist){
+            return res.status(409).send({status:false,message:`user name "${username}" already exist`});
+        }
+        const hashPassword = await bcrypt.hash(password,10)
+        const userData = {
+            username,
+            fullname,
+            password:hashPassword,
+            role:"ADMIN",
+            location_id,
+            created_by: req.user?.id
+        }
+
+        const newUser = new userModel(userData)
+
+        const savedUser = await newUser.save()
+
+        await logAudit({
+            userId: req.user?.id,
+            username: req.user?.username,
+            action: 'CREATE',
+            targetModel: 'User',
+            targetId: savedUser._id,
+            description: `Created admin "${savedUser.username}"`
+        })
+
+        res.status(200).send({ success: true, message: "admin created successfully" })
+    } catch (error) {
+        console.log("<>>error",error)
+        return res.status(500).send({ status: false, error: error.message, message: "internal server down" })
+    }
+}
 const faceRecongition = async (req, res) => {
     try {
         const { descriptor, userId } = req.body
@@ -130,9 +192,10 @@ const getAllUsers = async (req, res) => {
     const sortOrder = req.query.sortOrder === 'asc' ? 1 : -1;
 
     try {
-        const totalUsers = await UserSchema.countDocuments();
+        const locationFilter = req.user.role === 'SUPER ADMIN' ? { isDeleted: { $ne: true } } : { location_id: req.user.location_id, isDeleted: { $ne: true } };
+        const totalUsers = await UserSchema.countDocuments(locationFilter);
 
-        const users = await UserSchema.find()
+        const users = await UserSchema.find(locationFilter)
             .select('-password')
             .populate('role', 'roleName')
             .sort({ [sortField]: sortOrder })
@@ -169,7 +232,7 @@ const getUserById = async (req, res) => {
         if (!mongoose.Types.ObjectId.isValid(id)) {
             return res.status(400).json({ message: "Invalid ID format" });
         }
-        const user = await UserSchema.findById(id).select('-password');
+        const user = await UserSchema.findOne({ _id: id, isDeleted: { $ne: true } }).select('-password');
         if (!user) {
             return res.status(404).json({ success: false, message: 'User not found' });
         }
@@ -181,7 +244,8 @@ const getUserById = async (req, res) => {
 
 const updateUserById = async (req, res) => {
     try {
-        const { username, fullname, role, newPassword, oldPassword, descriptor } = req.body;
+        const { username, fullname, role, newPassword, oldPassword, descriptor, locationId } = req.body;
+        const locationInput = locationId || req.body.location_id;
         const updateData = {};
 
         const faceCheck = await faceRecognitionExcludeUserService(descriptor, req.params.id)
@@ -221,6 +285,16 @@ const updateUserById = async (req, res) => {
         // Optional updates
         if (fullname) updateData.fullname = fullname;
         if (role) updateData.role = role;
+        if (role === 'ADMIN') {
+            if (req.user.role === 'SUPER ADMIN' && locationInput) {
+                updateData.location_id = locationInput;
+            } else if (req.user.location_id) {
+                updateData.location_id = req.user.location_id;
+            }
+        } else if (req.user.role === 'SUPER ADMIN' && locationInput) {
+            updateData.location_id = locationInput;
+        }
+        if (req.user && req.user.id) updateData.updated_by = req.user.id;
         if (descriptor) updateData.descriptor = descriptor
 
         // Update user
@@ -250,11 +324,19 @@ const updateUserById = async (req, res) => {
 
 const deleteUser = async (req, res) => {
     try {
-        const deletedUser = await UserSchema.findByIdAndDelete(req.params.id);
+        const deletedUser = await UserSchema.findByIdAndUpdate(req.params.id, { isDeleted: true }, { new: true });
         if (!deletedUser) {
             return res.status(404).json({ success: false, message: 'User not found' });
         }
-        await inmateModel.deleteOne({ inmateId: deletedUser.inmateId })
+        await inmateModel.updateMany(
+            { 
+                $or: [
+                    { user_id: deletedUser._id },
+                    { registration_number: deletedUser.username }
+                ]
+            },
+            { isDeleted: true }
+        );
         await logAudit({
             userId: req.user.id,
             username: req.user.username,
@@ -283,11 +365,11 @@ const deleteFaceRecognitionRecord = async (req, res) => {
         await UserSchema.findByIdAndUpdate(id, { descriptor: [] }).then((data) => {
             return res.status(200).send({ status: true, message: "face recogintion data deleted successfully" });
         }).catch((error) => {
-            return res.status(500).send({ status: true, message: "internal server down",error:error.message });
+            return res.status(500).send({ status: true, message: "internal server down", error: error.message });
         })
     } catch (error) {
         res.status(500).json({ success: false, message: 'Internal server error', error: error.message });
     }
 }
 
-module.exports = { createUser, getAllUsers, getUserById, updateUserById, deleteUser, defaultUser, faceRecongition, faceRecongitionMatch, deleteFaceRecognitionRecord };
+module.exports = { createUser, getAllUsers, getUserById, updateUserById, deleteUser, defaultUser, faceRecongition, faceRecongitionMatch, deleteFaceRecognitionRecord, superAdminCreate };

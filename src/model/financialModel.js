@@ -28,6 +28,7 @@ const financialSchema = new mongoose.Schema({
     },
     contactNumber: { type: String }, // optional: if outsider provides phone number
     remarks: { type: String }, // additional notes
+    location_id: { type: mongoose.Schema.Types.ObjectId, ref: 'StudentLocation'},
 
 }, { timestamps: true });
 

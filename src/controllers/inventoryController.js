@@ -3,6 +3,7 @@ const storeItemModel = require("../model/storeInventory")
 const tuckShopModel = require("../model/tuckShopModel")
 const CanteenInventory = require("../model/canteenInventory")
 const { getVendorPurchaseSummary } = require("../service/storeInventoryService")
+const { requireUserLocation } = require("../utils/locationGuard");
 exports.addInventoryStock = async (req, res) => {
   try {
     const { date, invoiceNo, vendorName, vendorValue, gatePassNumber, contact, status, storeItems } = req.body
@@ -13,24 +14,34 @@ exports.addInventoryStock = async (req, res) => {
     if (isExistInvoice) {
       return res.status(400).send({ success: false, message: "invoice already exists" })
     }
-    const vendorPurchase = await vendorPurchaseModel.create({ date, invoiceNo, gatePassNumber, vendorName, vendorValue, contact, status })
+    const location_id = req.user.role === 'SUPER ADMIN' ? req.body.location_id : req.user.location_id;
+    const vendorPurchase = await vendorPurchaseModel.create({ date, invoiceNo, gatePassNumber, vendorName, vendorValue, contact, status, location_id })
     let storeItem
     for (const item of storeItems) {
       storeItem = await storeItemModel.create({ vendorPurchase: vendorPurchase._id, itemName: item.itemName, itemNo: item.itemNo, amount: item.amount, stock: item.stock, sellingPrice: item.sellingPrice, category: item.category, status: item.status })
-      const itemExist = await tuckShopModel.findOne({ itemNo: item.itemNo })
+      const itemExist = await tuckShopModel.findOne({ itemNo: item.itemNo, location_id })
       if (!itemExist) {
-        await tuckShopModel.create({ itemName: item.itemName, price: item.sellingPrice, stockQuantity: 0, category: item.category, itemNo: item.itemNo, status: item.status })
+        await tuckShopModel.create({ itemName: item.itemName, price: item.sellingPrice, stockQuantity: 0, category: item.category, itemNo: item.itemNo, status: item.status, location_id })
       }
     }
     return res.send({ success: true, data: storeItem, message: "inventory added successfully" })
   } catch (error) {
+    console.log("<><>error",error)
     return res.status(500).send({ success: false, message: "internal server down", error: error.message })
   }
 }
 
 exports.getInventoryStock = async (req, res) => {
   try {
-    const result = await getVendorPurchaseSummary(req.query)
+    const query = { ...req.query };
+    if (req.user.role !== 'SUPER ADMIN') {
+      const locationId = requireUserLocation(req, res);
+      if (!locationId) return;
+      query.location_id = locationId;
+    } else if (req.query.location_id) {
+      query.location_id = req.query.location_id;
+    }
+    const result = await getVendorPurchaseSummary(query)
     if (result.length === 0) {
       return res.status(200).send({ success: false, data: result, message: "inventory stock not found" })
     }
@@ -435,6 +446,13 @@ exports.getAllCanteenItem1 = async (req, res) => {
 
     /* 1️⃣ Build filter for TuckShop */
     const filter = {};
+    if (req.user.role !== 'SUPER ADMIN') {
+      const locationId = requireUserLocation(req, res);
+      if (!locationId) return;
+      filter.location_id = locationId;
+    } else if (req.query.location_id) {
+      filter.location_id = req.query.location_id;
+    }
     if (itemName) filter.itemName = { $regex: itemName, $options: "i" };
     if (category) filter.category = { $regex: `^${category}$`, $options: "i" };
     if (status) filter.status = status;
@@ -527,7 +545,7 @@ exports.getAllCanteenItem1 = async (req, res) => {
     } = req.query;
 
     /* 1️⃣ Build filter for TuckShop */
-    const filter = {};
+    const filter = req.user.role === 'SUPER ADMIN' ? {} : { location_id: req.user.location_id };
     if (itemName) filter.itemName = { $regex: itemName, $options: "i" };
     if (category) filter.category = { $regex: `^${category}$`, $options: "i" };
     if (status) filter.status = status;
@@ -611,7 +629,7 @@ exports.getAllCanteenItem = async (req, res) => {
     } = req.query;
 
     /* 1️⃣ Build filter for TuckShop */
-    const filter = {};
+    const filter = req.user.role === 'SUPER ADMIN' ? {} : { location_id: req.user.location_id };
     if (itemName) filter.itemName = { $regex: itemName, $options: "i" };
     if (category) filter.category = { $regex: `^${category}$`, $options: "i" };
     if (status) filter.status = status;
@@ -720,6 +738,9 @@ exports.getCanteenItemListOptions = async (req, res) => {
   try {
     const { itemNo } = req.query
     const filter = { status: "Active" };
+    if (req.user.role !== 'SUPER ADMIN') {
+      filter.location_id = req.user.location_id;
+    }
     if (itemNo) {
       filter.itemNo = { $regex: itemNo, $options: "i" };
     }
@@ -734,11 +755,18 @@ exports.getCanteenItemListOptions = async (req, res) => {
 exports.createCanteenStock = async (req, res) => {
   try {
     const { itemName, category, itemNo, stockQuantity, sellingPrice, status } = req.body;
-    const inventoryItem = await storeItemModel.findOne({ itemNo });
-    if (inventoryItem) {
-      return res.status(404).json({ success: false, message: "item already exists" });
+    const providedLocationId = req.body.location_id || req.body.locationId;
+    const location_id = providedLocationId || req.user.location_id;
+
+    if (!location_id) {
+      return res.status(400).json({ success: false, message: "Location is required to create canteen stock" });
     }
-    const tuckshopItem = await tuckShopModel.findOne({ itemNo });
+
+    const inventoryItem = await storeItemModel.findOne({ itemNo, location_id });
+    if (inventoryItem) {
+      return res.status(404).json({ success: false, message: "item number already exists" });
+    }
+    const tuckshopItem = await tuckShopModel.findOne({ itemNo, location_id });
     if (tuckshopItem) {
       return res.status(404).json({ success: false, message: "item already exists in tuckshop" });
     }
@@ -748,8 +776,9 @@ exports.createCanteenStock = async (req, res) => {
       itemNo,
       stock: 0,
       sellingPrice,
-      status
-    })
+      status,
+      location_id,
+    });
 
     await tuckShopModel.create({
       itemName,
@@ -757,11 +786,13 @@ exports.createCanteenStock = async (req, res) => {
       stockQuantity: stockQuantity,
       category,
       itemNo,
-      status
-    })
+      status,
+      location_id,
+    });
     return res.status(200).json({ success: true, message: "canteen stock created successfully" });
 
   } catch (error) {
+    console.log("Error in createCanteenStock:", error);
     return res.status(500).json({ success: false, message: "internal server down", error: error });
   }
-}
+};

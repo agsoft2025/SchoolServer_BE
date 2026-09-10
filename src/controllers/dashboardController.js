@@ -9,34 +9,39 @@ const getDashboardData = async (req, res) => {
         const todayStart = new Date();
         todayStart.setHours(0, 0, 0, 0);
 
+        const locationFilter = req.user.role === 'SUPER ADMIN' ? {} : { location_id: req.user.location_id };
+
         // 1. Total inmates
-        const totalInmates = await Inmate.countDocuments();
+        const totalInmates = await Inmate.countDocuments(locationFilter);
 
         // 2. Total balance across all inmates
         const totalBalanceAgg = await Inmate.aggregate([
+            { $match: locationFilter },
             { $group: { _id: null, totalBalance: { $sum: "$deposite_amount" } } }
         ]);
         const totalBalance = totalBalanceAgg[0]?.totalBalance || 0;
 
         // 3. Today's POS transactions
         const todaysPOSTransactions = await POSShoppingCart.find({
-            createdAt: { $gte: todayStart }
+            createdAt: { $gte: todayStart },
+            ...locationFilter
         }).populate("student_id");
 
         // 4. Total POS sales today
         const totalSalesToday = todaysPOSTransactions.reduce((sum, trx) => sum + trx.totalAmount, 0);
 
         // 5. Tuckshop data
-        const tuckItems = await TuckShop.find();
+        const tuckItems = await TuckShop.find(locationFilter);
         const tuckshopStockValue = tuckItems.reduce((sum, item) => sum + (item.price * item.stockQuantity), 0);
 
         // 6. Low balance inmates
         const lowBalanceThreshold = 100;
-        const lowBalanceInmates = await Inmate.find({ deposite_amount: { $lt: lowBalanceThreshold } });
+        const lowBalanceInmates = await Inmate.find({ deposite_amount: { $lt: lowBalanceThreshold }, ...locationFilter });
 
         // 7. Today's Financial transactions
         const todaysFinancialTransactions = await Financial.find({
-            createdAt: { $gte: todayStart }
+            createdAt: { $gte: todayStart },
+            ...locationFilter
         }).populate("student_id");
 
         // 8. Total wages + deposits today
@@ -45,14 +50,14 @@ const getDashboardData = async (req, res) => {
         }, 0);
 
         // 9. Recent POS transactions
-        const recentPOSTransactions = await POSShoppingCart.find()
+        const recentPOSTransactions = await POSShoppingCart.find(locationFilter)
             .sort({ createdAt: -1 })
             .limit(10)
             .populate("student_id")
             .populate('products.productId');
 
         // 10. Recent Financial transactions
-        const recentFinancialTransactions = await Financial.find().populate("student_id")
+        const recentFinancialTransactions = await Financial.find(locationFilter).populate("student_id")
             .sort({ createdAt: -1 })
             .limit(10);
 
@@ -67,13 +72,21 @@ const getDashboardData = async (req, res) => {
 
                 const trxObj = trx.toObject ? trx.toObject() : trx; // convert Mongoose doc to plain object
 
+                const isReversed = Boolean(trx.is_reversed || trx.isReversed);
+                const statusLabel = isReversed ? "Reversed" : trx.status || "Completed";
+
                 return {
                     _id: trx._id,
                     type: 'POS',
                     totalAmount: trx.totalAmount,
                     createdAt: trx.createdAt,
+                    status: statusLabel,
+                    isReversed,
                     details: {
                         ...trxObj,
+                        status: trxObj.status || statusLabel,
+                        is_reversed: isReversed,
+                        isReversed,
                         custodyType: inmate?.custodyType || null
                     }
                 };
@@ -85,6 +98,8 @@ const getDashboardData = async (req, res) => {
             type: 'Financial',
             totalAmount: trx.wageAmount || trx.depositAmount || 0,
             createdAt: trx.createdAt,
+            status: trx.status || "Completed",
+            isReversed: Boolean(trx.is_reversed || trx.isReversed),
             details: trx
         }));
 
