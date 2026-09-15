@@ -5,12 +5,24 @@ const SmsLog = require('../model/smsLogModel');
 const { resolveRecipients } = require('../service/sms/recipientResolver');
 const { processBatch } = require('../service/sms/batchProcessor');
 const { getActiveProvider } = require('../service/sms/providers');
-const { getActiveTemplates, findActiveTemplate } = require('../service/sms/templateRegistry');
+const {
+  getActiveTemplates,
+  getSchoolSmsMeta,
+  findActiveTemplate,
+  DEFAULT_SENDER_HEADER,
+} = require('../service/sms/templateRegistry');
 const { validateValues, assembleMessage } = require('../service/sms/dltAssembler');
 
 const MODES = ['individual', 'bulk', 'classwise', 'hostelwise'];
 
 const canAccessLocation = (user, locationId) => user.role === 'SUPER ADMIN' || String(locationId) === String(user.location_id);
+
+// The cross-service tenant key used to scope templates to a school. For a
+// School Admin it is always their own location; a SUPER ADMIN must name the
+// target school explicitly (query/body `location_id`). Equals this server's
+// StudentLocation._id == the Global Location.externalId.
+const resolveSchoolKey = (user, explicitLocationId) =>
+  String((user.role === 'SUPER ADMIN' ? explicitLocationId : user.location_id) || '');
 
 // Ordered value list for a template's {#...#} slots.
 //   'input'  fields come from the sender's form (identical for every recipient)
@@ -98,14 +110,33 @@ exports.previewRecipients = async (req, res) => {
 // template id is deliberately NOT exposed — the sender must not see or change it.
 exports.getTemplates = async (req, res) => {
   try {
-    const templates = await getActiveTemplates();
+    // A School Admin is always scoped to their own school. A SUPER ADMIN may
+    // scope to a named school (?location_id=) or, with none, see the full active
+    // catalogue (trusted, legacy behaviour).
+    const schoolKey = resolveSchoolKey(req.user, req.query.location_id);
+    const [templates, meta] = await Promise.all([
+      getActiveTemplates(schoolKey ? { externalId: schoolKey } : {}),
+      schoolKey ? getSchoolSmsMeta(schoolKey) : Promise.resolve({ assignedSenderIds: [], source: 'fallback' }),
+    ]);
+
+    // Only senders that actually have at least one usable template are worth
+    // offering in the SMS Center picker.
+    const senderIds = [...new Set(templates.map((t) => t.senderId).filter(Boolean))].sort();
+
     res.json({
       success: true,
+      // The Sender ID(s) this school may send under, and whether that came from
+      // an explicit Super Admin assignment ('config') or the historical default
+      // ('fallback'). An empty list with source 'config' == SMS disabled.
+      assignedSenderIds: meta.assignedSenderIds || [],
+      senderSource: meta.source || 'fallback',
+      senderIds,
       data: templates.map((t) => ({
         id: t.id,
         key: t.key,
         name: t.name,
         domain: t.domain,
+        senderId: t.senderId, // visible sender header only — the DLT numeric id stays hidden
         approvedText: t.approvedText,
         placeholderCount: t.placeholderCount,
         version: t.version,
@@ -127,7 +158,17 @@ exports.getTemplates = async (req, res) => {
 exports.sendSms = async (req, res) => {
   try {
     console.log("<><>working",req.body);
-    const { mode, templateId, variables: inputVars, studentId, classIds, hostelNames, search, locationId } = req.body;
+    const {
+      mode,
+      templateId,
+      senderId: bodySenderId,
+      variables: inputVars,
+      studentId,
+      classIds,
+      hostelNames,
+      search,
+      locationId,
+    } = req.body;
 
     if (!MODES.includes(mode)) {
       return res.status(400).json({ success: false, message: 'Invalid mode. Must be individual, bulk, classwise or hostelwise' });
@@ -146,16 +187,70 @@ exports.sendSms = async (req, res) => {
     if (!templateId) {
       return res.status(400).json({ success: false, message: 'An SMS template must be selected' });
     }
-    const template = await findActiveTemplate(templateId);
-    console.log("template",template);  
+
+    // ------------------------------------------------------------------
+    // Tenant + Sender ID + Template authorization (all server-side).
+    //   authenticated user -> role -> school/location -> assigned Sender ID
+    //   -> selected template -> Sender ID ↔ Template relationship -> send
+    // Nothing here trusts a client-supplied schoolId/locationId: for a School
+    // Admin the tenant key comes only from req.user.location_id.
+    // ------------------------------------------------------------------
+    const schoolKey = resolveSchoolKey(req.user, locationId);
+
+    // The Sender ID(s) this school may send under.
+    const { assignedSenderIds = [], source: senderSource = 'fallback' } = schoolKey
+      ? await getSchoolSmsMeta(schoolKey)
+      : { assignedSenderIds: [], source: 'fallback' };
+    const allowedSenders = senderSource === 'fallback' && schoolKey
+      ? [DEFAULT_SENDER_HEADER]
+      : assignedSenderIds.map((h) => String(h).toUpperCase());
+
+    if (schoolKey && senderSource === 'config' && allowedSenders.length === 0) {
+      return res.status(403).json({
+        success: false,
+        message: 'No SMS Sender ID is configured for your school. Ask your administrator to assign one.',
+      });
+    }
+
+    // Resolve the effective Sender ID: honour the one the sender picked; if none
+    // given and the school has exactly one, use it; otherwise require a choice.
+    let senderId = String(bodySenderId || '').trim().toUpperCase();
+    if (!senderId) {
+      if (allowedSenders.length === 1) senderId = allowedSenders[0];
+      else if (schoolKey)
+        return res.status(400).json({ success: false, message: 'A Sender ID must be selected' });
+    }
+    // The chosen Sender ID must be one this school may use (never silently fall back).
+    if (schoolKey && senderId && !allowedSenders.includes(senderId)) {
+      return res.status(403).json({ success: false, message: 'That Sender ID is not assigned to your school' });
+    }
+
+    const template = await findActiveTemplate(templateId, schoolKey || undefined);
     if (!template) {
-      return res
-        .status(400)
-        .json({ success: false, message: 'Selected template is not available (inactive, deleted, or not a SCHOOL template)' });
+      return res.status(403).json({
+        success: false,
+        message: schoolKey
+          ? 'This SMS template is not available for your school'
+          : 'Selected template is not available (inactive, deleted, or not a SCHOOL template)',
+      });
     }
     if (!template.dltTemplateId) {
       return res.status(400).json({ success: false, message: 'Template has no DLT Template ID configured; cannot send' });
     }
+
+    const templateSender = String(template.senderId || '').trim().toUpperCase();
+    if (!templateSender) {
+      return res.status(400).json({ success: false, message: 'Template has no Sender ID configured; cannot send' });
+    }
+    // The template must belong to the selected Sender ID (blocks a templateId
+    // from another sender being paired with an allowed sender).
+    if (senderId && templateSender !== senderId) {
+      return res
+        .status(403)
+        .json({ success: false, message: 'The selected template does not belong to the selected Sender ID' });
+    }
+    // For the trusted no-school (SUPER ADMIN) path, take the template's sender.
+    if (!senderId) senderId = templateSender;
 
     const inputFieldSpecs = (template.fields || []).filter((f) => f.source === 'input');
     const inputKeys = new Set(inputFieldSpecs.map((f) => f.key));
@@ -197,6 +292,7 @@ exports.sendSms = async (req, res) => {
         ...r,
         templateId: template.dltTemplateId, // real DLT numeric id passed to Fast2SMS
         dltVariables: values,
+        senderId, // derived from the template — never taken from the client
         message: assembleMessage(template.approvedText, values),
         templateKey: template.key,
         templateVersion: template.version,
@@ -210,6 +306,7 @@ exports.sendSms = async (req, res) => {
       message: prepared[0].message,
       provider: provider.name,
       dlt_template_id: template.dltTemplateId,
+      sender_id: senderId,
       template_key: template.key,
       template_version: template.version,
       template_name: template.name,
@@ -330,6 +427,7 @@ exports.retryFailed = async (req, res) => {
       message: log.message,
       templateId: log.dlt_template_id,
       dltVariables: log.dlt_variables,
+      senderId: log.sender_id,
       templateKey: log.template_key,
       templateVersion: log.template_version,
       variables: { student_name: log.recipient_name },

@@ -50,6 +50,7 @@ const processBatch = async (batchId, recipients, template) => {
         location_id: recipient.locationId,
         dlt_template_id: recipient.templateId,
         dlt_variables: recipient.dltVariables,
+        sender_id: recipient.senderId,
         template_key: recipient.templateKey,
         template_version: recipient.templateVersion,
       });
@@ -63,6 +64,7 @@ const processBatch = async (batchId, recipients, template) => {
           sendArgs.route = 'dlt';
           sendArgs.templateId = recipient.templateId;
           sendArgs.variables = recipient.dltVariables;
+          sendArgs.senderId = recipient.senderId;
         }
 
         const result = await provider.send(sendArgs);

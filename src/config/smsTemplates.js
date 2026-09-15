@@ -11,6 +11,8 @@
 //   domain         - always SCHOOL here
 //   dltTemplateId  - the operator/DLT numeric template id sent to Fast2SMS
 //   approvedText   - exact approved text; one {#var#} per ordered slot
+//   senderId       - the DLT-approved sender header this template is registered
+//                    under (derived, never chosen by the School Admin)
 //   fields[]       - one per slot, IN ORDER
 //       source: 'input'  => School Admin types it in the SMS Center
 //               'record' => value comes from the student record (read-only)
@@ -24,6 +26,7 @@ module.exports = [
       process.env.FAST2SMS_TEMPLATE_ID && process.env.FAST2SMS_TEMPLATE_ID !== 'your_template_id'
         ? process.env.FAST2SMS_TEMPLATE_ID
         : '224809',
+    senderId: (process.env.FAST2SMS_SENDER_ID || 'AGSWSL').toUpperCase(),
     approvedText: 'Dear {#var#}, {#var#} - SID GROUPS',
     fields: [
       { key: 'student_name', label: 'Student name', type: 'text', maxLength: 30, required: true, source: 'record' },
